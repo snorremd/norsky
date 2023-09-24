@@ -1,12 +1,17 @@
 package main
 
 import (
-	_ "embed"
+	"fmt"
 	"norsky/cmd"
+	"os"
 
-	_ "golang.org/x/crypto/x509roots/fallback" // We need this to make TLS work in scratch containers
+	_ "golang.org/x/crypto/x509roots/fallback"
 )
 
 func main() {
-	cmd.Execute()
+	app := cmd.RootApp()
+	if err := app.Run(os.Args); err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
 }

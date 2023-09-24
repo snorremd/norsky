@@ -5,8 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"norsky/database"
+	"norsky/models"
 	"strings"
+	"time"
 
 	"github.com/bluesky-social/indigo/api/atproto"
 	appbsky "github.com/bluesky-social/indigo/api/bsky"
@@ -28,14 +29,17 @@ type Firehose struct {
 	scheduler *sequential.Scheduler // The scheduler to use for the firehose
 	// A channel to write feed posts to
 	postChan chan interface{}
+	// The context for this process
+	context context.Context
 }
 
-func New(postChan chan interface{}) *Firehose {
+func New(postChan chan interface{}, context context.Context) *Firehose {
 	dialer := websocket.DefaultDialer
 	firehose := &Firehose{
 		address:  "wss://bsky.social/xrpc/com.atproto.sync.subscribeRepos",
 		dialer:   dialer,
 		postChan: postChan,
+		context:  context,
 	}
 
 	return firehose
@@ -50,7 +54,7 @@ func (firehose *Firehose) Subscribe() error {
 	}
 
 	firehose.conn = conn
-	firehose.scheduler = sequential.NewScheduler(conn.RemoteAddr().String(), eventProcessor(firehose.postChan).EventHandler)
+	firehose.scheduler = sequential.NewScheduler(conn.RemoteAddr().String(), eventProcessor(firehose.postChan, firehose.context).EventHandler)
 	events.HandleRepoStream(context.Background(), conn, firehose.scheduler)
 
 	return nil
@@ -62,28 +66,26 @@ func (firehose *Firehose) Shutdown() {
 	fmt.Println("Firehose shutdown")
 }
 
-func eventProcessor(postChan chan interface{}) *events.RepoStreamCallbacks {
+func eventProcessor(postChan chan interface{}, context context.Context) *events.RepoStreamCallbacks {
 	streamCallbacks := &events.RepoStreamCallbacks{
 		RepoCommit: func(evt *atproto.SyncSubscribeRepos_Commit) error {
-			rr, err := repo.ReadRepoFromCar(context.TODO(), bytes.NewReader(evt.Blocks))
+			rr, err := repo.ReadRepoFromCar(context, bytes.NewReader(evt.Blocks))
 			if err != nil {
-				fmt.Printf("Error reading repo from car: %s\n", err)
 				return err
 			}
 			// Get operations by type
 			for _, op := range evt.Ops {
 				if strings.Split(op.Path, "/")[0] != "app.bsky.feed.post" {
-					continue
+					continue // Skip if not a post, e.g. like, follow, etc.
 				}
 
 				uri := fmt.Sprintf("at://%s/%s", evt.Repo, op.Path)
-
 				event_type := repomgr.EventKind(op.Action)
+
 				switch event_type {
 				case repomgr.EvtKindCreateRecord, repomgr.EvtKindUpdateRecord:
-					_, rec, err := rr.GetRecord(context.TODO(), op.Path)
+					_, rec, err := rr.GetRecord(context, op.Path)
 					if err != nil {
-						fmt.Printf("Error getting record %s: %s\n", op.Path, err)
 						continue
 					}
 
@@ -91,25 +93,30 @@ func eventProcessor(postChan chan interface{}) *events.RepoStreamCallbacks {
 						Val: rec,
 					}
 
-					var post = appbsky.FeedPost{}
-
-					marshaller, err := decoder.MarshalJSON()
+					jsonRecord, err := decoder.MarshalJSON() // The LexiconTypeDecoder will decode the record into a JSON representation
 
 					if err != nil {
-						fmt.Println(err)
+						continue
 					}
 
-					err = json.Unmarshal(marshaller, &post)
+					var post = appbsky.FeedPost{} // Unmarshal JSON formatted record into a FeedPost
+					err = json.Unmarshal(jsonRecord, &post)
 					if err != nil {
-						fmt.Println(err)
+						continue
 					}
 
-					if lo.Contains(post.Langs, "nb") {
-						postChan <- database.CreatePostEvent{
-							Post: database.Post{
-								Uri:       uri,
-								CreatedAt: post.CreatedAt,
-							},
+					// Contains any of the languages in the post that are one of the following: nb, nn, smi
+					if lo.Some(post.Langs, []string{"no", "nb", "nn", "smi"}) {
+						createdAt, err := time.Parse(time.RFC3339, post.CreatedAt)
+						if err == nil {
+							postChan <- models.CreatePostEvent{
+								Post: models.Post{
+									Uri:       uri,
+									CreatedAt: createdAt.Unix(),
+									Text:      post.Text,
+									Languages: post.Langs,
+								},
+							}
 						}
 					}
 

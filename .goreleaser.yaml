@@ -22,7 +22,6 @@ builds:
       - linux
       - windows
       - darwin
-    
 
 archives:
   - format: tar.gz
@@ -48,8 +47,8 @@ dockers:
   - --platform=linux/amd64
   - --label=org.opencontainers.image.title={{ .ProjectName }}
   - --label=org.opencontainers.image.description={{ .ProjectName }}
-  - --label=org.opencontainers.image.url=https://github.com/caarlos0/{{ .ProjectName }}
-  - --label=org.opencontainers.image.source=https://github.com/caarlos0/{{ .ProjectName }}
+  - --label=org.opencontainers.image.url=https://github.com/snorremd/{{ .ProjectName }}
+  - --label=org.opencontainers.image.source=https://github.com/snorremd/{{ .ProjectName }}
   - --label=org.opencontainers.image.version={{ .Version }}
   - --label=org.opencontainers.image.created={{ time "2006-01-02T15:04:05Z07:00" }}
   - --label=org.opencontainers.image.revision={{ .FullCommit }}
@@ -62,8 +61,8 @@ dockers:
   - --platform=linux/arm64/v8
   - --label=org.opencontainers.image.title={{ .ProjectName }}
   - --label=org.opencontainers.image.description={{ .ProjectName }}
-  - --label=org.opencontainers.image.url=https://github.com/caarlos0/{{ .ProjectName }}
-  - --label=org.opencontainers.image.source=https://github.com/caarlos0/{{ .ProjectName }}
+  - --label=org.opencontainers.image.url=https://github.com/snorremd/{{ .ProjectName }}
+  - --label=org.opencontainers.image.source=https://github.com/snorremd/{{ .ProjectName }}
   - --label=org.opencontainers.image.version={{ .Version }}
   - --label=org.opencontainers.image.created={{ time "2006-01-02T15:04:05Z07:00" }}
   - --label=org.opencontainers.image.revision={{ .FullCommit }}
@@ -75,7 +74,7 @@ docker_manifests:
   image_templates:
   - ghcr.io/snorremd/{{ .ProjectName }}:{{ .Version }}-amd64
   - ghcr.io/snorremd/{{ .ProjectName }}:{{ .Version }}-arm64v8
-- name_template: ghcr.io/caarlos0/{{ .ProjectName }}:latest
+- name_template: ghcr.io/snorremd/{{ .ProjectName }}:latest
   image_templates:
   - ghcr.io/snorremd/{{ .ProjectName }}:{{ .Version }}-amd64
   - ghcr.io/snorremd/{{ .ProjectName }}:{{ .Version }}-arm64v8
