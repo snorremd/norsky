@@ -86,7 +86,7 @@ func Server(config *ServerConfig) *fiber.App {
 		generatorFeeds := []*bsky.FeedDescribeFeedGenerator_Feed{}
 		for algorithm := range feeds.Feeds {
 			generatorFeeds = append(generatorFeeds, &bsky.FeedDescribeFeedGenerator_Feed{
-				Uri: "did:web:" + config.Hostname + "/app.bsky.feed.generator/" + algorithm,
+				Uri: "at://did:web:" + config.Hostname + "/app.bsky.feed.generator/" + algorithm,
 			})
 		}
 
