@@ -71,7 +71,7 @@ func Server(config *ServerConfig) *fiber.App {
 			"id":       "did:web:" + config.Hostname,
 			"service": []map[string]interface{}{
 				{
-					"id":              "#norsky",
+					"id":              "#bsky_fg",
 					"type":            "BskyFeedGenerator",
 					"serviceEndpoint": "https://" + config.Hostname,
 				},
