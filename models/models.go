@@ -2,11 +2,11 @@ package models
 
 // Post model with key fields from the post
 type Post struct {
-	Id        int64    `json:"id"`
+	Id        int64    `json:"-"`
 	Uri       string   `json:"post"`
-	CreatedAt int64    `json:"createdAt"` // Unix timestamp
-	Text      string   `json:"text"`      // We don't want to store the text in the database
-	Languages []string `json:"languages"`
+	CreatedAt int64    `json:"-"`
+	Text      string   `json:"-"`
+	Languages []string `json:"-"`
 }
 
 // CreateEvent fired when a new post is created
