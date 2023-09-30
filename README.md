@@ -12,7 +12,12 @@ It is also available as a Docker image.
 ### From GitHub release
 
 ```bash
-curl -L 
+# On Linux you would typically do
+curl -O https://github.com/snorremd/norsky/releases/download/v0.1.4/norsky_Linux_x86_64.tar.gz
+tar -xvf norsky_Linux_x86_64.tar.gz
+chmod +x norsky
+# If you want to install it globally you can move it to /usr/local/bin
+sudo mv norsky /usr/local/bin
 ```
 
 ### Go install
@@ -24,9 +29,8 @@ go install github.com/snorreio/norsky
 ### Docker
 
 ```bash
-docker run -d --name norsky -p 8080:8080 -v /path/to/db:/db ghcr.io/snorreio/norsky:latest
+docker pull ghrc.io/snorreio/norsky:latest
 ```
-
 
 ## Usage
 
@@ -84,6 +88,11 @@ The application follows the standard way to structure a Go project and contains 
 - `models` - The models package that contains the models for the application.
 - `dist` - Where goreleaser puts the release artifacts if you build the application using goreleaser locally.
 
+### Testing
+
+Currently there are no tests for the application.
+The application relies heavily on channels and external services which makes it hard to test.
+If you have any ideas on how to test the application, please open an issue or a pull request.
 
 ## Contributing
 
@@ -98,7 +107,33 @@ If you want to provide feedback in private, you can send me an email at [contact
 ## Release
 
 This project uses [goreleaser](https://goreleaser.com/) to build and release the application.
+To release a new version you need to create a new tag for the release titled `vX.X.X` and push it to main.
+This will trigger a GitHub action that builds the application for all platforms and creates a GitHub release with the artifacts.
+The release will list the changes since the last release based on the commit messages using conventional commits.
 
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## Acknowledgements
+
+This project would not have been possible without the help of the following projects and the people behind them.
+
+### [ATProto Feed Generator repository](https://github.com/bluesky-social/feed-generator)
+
+The ATProto Feed Generator repository provides a reference implementation for generating feeds for Bluesky written in TypeScript.
+It was of great help when developing the feed server as I could easily parse the data types and see what the endpoints should return.
+
+### [bsky-furry-feed](https://github.com/strideynet/bsky-furry-feed)
+
+This repository saved my day when I realized there was no ATProto API client in the official bluesky indigo golang repository.
+I was looking at how the TypeScript, Python, and Ruby feed generator example projects handled feed registration and saw that they all used ATProto API clients.
+I could only work on this feed in my spare time and I didn't want to spend time writing an ATProto API client in Go.
+I found this repository and it was a great help as I could easily register the feed using their client implementation and focus on the feed server.
+They also made me aware of a new go library for building out a command line app, [github.com/urfave/cli/v2](github.com/urfave/cli/v2).
+
+
+### [blueskyfirehose](https://github.com/CharlesDardaman/blueskyfirehose)
+
+The blueskyfirehose repository and app contained a nice example of how to use a websocket client to subscribe to the Bluesky firehose.
+I used this as a reference when developing the firehose client for the feed server.
