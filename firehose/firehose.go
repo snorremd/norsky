@@ -16,8 +16,10 @@ import (
 	lexutil "github.com/bluesky-social/indigo/lex/util"
 	"github.com/bluesky-social/indigo/repo"
 	"github.com/bluesky-social/indigo/repomgr"
+	"github.com/cenkalti/backoff/v4"
 	"github.com/gorilla/websocket"
 	"github.com/samber/lo"
+	log "github.com/sirupsen/logrus"
 )
 
 // Add a firehose model to use as a receiver pattern for the firehose
@@ -46,18 +48,30 @@ func New(postChan chan interface{}, context context.Context) *Firehose {
 }
 
 // Subscribe to the firehose using the Firehose struct as a receiver
-func (firehose *Firehose) Subscribe() error {
-	conn, _, err := firehose.dialer.Dial(firehose.address, nil)
-	if err != nil {
-		fmt.Printf("Error connecting to firehose: %s\n", err)
-		return err
+func (firehose *Firehose) Subscribe() {
+
+	backoff := backoff.NewExponentialBackOff()
+
+	for {
+		conn, _, err := firehose.dialer.Dial(firehose.address, nil)
+		if err != nil {
+			log.Errorf("Error connecting to firehose: %s", err)
+			time.Sleep(backoff.NextBackOff())
+			// Increase backoff by factor of 1.3, rounded to nearest whole number
+			continue
+		}
+
+		firehose.conn = conn
+		firehose.scheduler = sequential.NewScheduler(conn.RemoteAddr().String(), eventProcessor(firehose.postChan, firehose.context).EventHandler)
+		err = events.HandleRepoStream(context.Background(), conn, firehose.scheduler)
+
+		// If error sleep
+		if err != nil {
+			log.Errorf("Error handling repo stream: %s", err)
+			time.Sleep(backoff.NextBackOff())
+			continue
+		}
 	}
-
-	firehose.conn = conn
-	firehose.scheduler = sequential.NewScheduler(conn.RemoteAddr().String(), eventProcessor(firehose.postChan, firehose.context).EventHandler)
-	events.HandleRepoStream(context.Background(), conn, firehose.scheduler)
-
-	return nil
 }
 
 func (firehose *Firehose) Shutdown() {
