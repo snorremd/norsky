@@ -104,11 +104,7 @@ func serveCmd() *cli.Command {
 
 			go func() {
 				fmt.Println("Subscribing to firehose...")
-				if err := fh.Subscribe(); err != nil {
-					// Use signal to shutdown all the goroutines
-					log.Error(err)
-					c <- os.Interrupt
-				}
+				fh.Subscribe()
 			}()
 
 			go func() {

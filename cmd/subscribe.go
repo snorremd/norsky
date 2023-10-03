@@ -58,9 +58,7 @@ Prints all other log messages to stderr.`,
 
 			go func() {
 				fmt.Println("Subscribing to firehose...")
-				if err := fh.Subscribe(); err != nil {
-					log.Panic(err)
-				}
+				fh.Subscribe()
 			}()
 
 			go func() {
