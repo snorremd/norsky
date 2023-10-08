@@ -38,7 +38,7 @@ type Firehose struct {
 func New(postChan chan interface{}, context context.Context) *Firehose {
 	dialer := websocket.DefaultDialer
 	firehose := &Firehose{
-		address:  "wss://bsky.social/xrpc/com.atproto.sync.subscribeRepos",
+		address:  "wss://bsky.network/xrpc/com.atproto.sync.subscribeRepos",
 		dialer:   dialer,
 		postChan: postChan,
 		context:  context,
