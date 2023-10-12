@@ -2,12 +2,14 @@
 
 Norsky is a lightweight ATProto feed server that serves Norwegian posts from the Bluesky instance.
 It is written in Go and stores posts in a SQLite database to keep things simple.
+A dashboard is available at the root of the server `/`.
+The dashboard shows interesting statistics about the feed and Norwegian language posts.
+It is written in TypeScript using Solid.js and Tailwind CSS.
 
 ## Installation
 
 The feed server is a standalone go binary that you can run on your machine.
 It is also available as a Docker image.
-
 
 ### From GitHub release
 
@@ -20,17 +22,29 @@ chmod +x norsky
 sudo mv norsky /usr/local/bin
 ```
 
-### Go install
-
-```bash
-go install github.com/snorreio/norsky
-```
-
 ### Docker
 
 ```bash
 docker pull ghrc.io/snorreio/norsky:latest
 ```
+
+### From go source
+
+First install [go](https://go.dev/) and [bun](https://bun.sh/).
+Bun is used to build the frontend assets, go builds the application and bundles the frontend assets into the binary.
+Then clone the repository and build the application.
+
+```bash
+git clone https://github.com/snorremd/norsky.git
+cd norsky
+bun install
+bun run build
+go build -o norsky main.go
+
+# If you want to install it globally you can move it to /usr/local/bin
+sudo mv norsky /usr/local/bin
+```
+
 
 ## Usage
 

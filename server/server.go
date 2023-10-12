@@ -1,22 +1,28 @@
 package server
 
 import (
-	_ "embed"
+	"bufio"
+	"embed"
 	"fmt"
+	"net/http"
 	"norsky/db"
 	"norsky/feeds"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/bluesky-social/indigo/api/bsky"
 	"github.com/bluesky-social/indigo/atproto/syntax"
 	"github.com/gofiber/fiber/v2"
-	"github.com/gofiber/fiber/v2/middleware/favicon"
+	"github.com/gofiber/fiber/v2/middleware/cache"
+	"github.com/gofiber/fiber/v2/middleware/cors"
+	"github.com/gofiber/fiber/v2/middleware/filesystem"
 	log "github.com/sirupsen/logrus"
+	"github.com/valyala/fasthttp"
 )
 
-//go:embed assets/favicon.ico
-var faviconFile []byte
+//go:embed dist/*
+var dist embed.FS
 
 type ServerConfig struct {
 
@@ -32,7 +38,24 @@ func Server(config *ServerConfig) *fiber.App {
 
 	app := fiber.New()
 
-	// app.Use(cache.New())
+	// Setup CORS for localhost:3001
+	app.Use(func(c *fiber.Ctx) error {
+		corsConfig := cors.Config{
+			AllowOrigins:     "http://localhost:3001",
+			AllowCredentials: true,
+		}
+		return cors.New(corsConfig)(c)
+	})
+
+	// Serve the Solid dashboard
+	app.Use("/", filesystem.New(filesystem.Config{
+		Browse:     false,
+		Index:      "index.html",
+		Root:       http.FS(dist),
+		PathPrefix: "/dist",
+	}))
+
+	// Serve the assets
 
 	// Middleware to track the latency of each request
 	app.Use(func(c *fiber.Ctx) error {
@@ -54,13 +77,25 @@ func Server(config *ServerConfig) *fiber.App {
 		return err
 	})
 
-	app.Use(favicon.New(favicon.Config{
-		Data: faviconFile,
+	// Setup cache
+	app.Use(cache.New(cache.Config{
+		Next: func(c *fiber.Ctx) bool {
+			// Only cache dashboard requests
+			if strings.HasPrefix(c.Path(), "/dashboard") {
+				log.WithFields(log.Fields{
+					"path": c.Path(),
+				}).Info("Cache request")
+				return false
+			}
+			return true
+		},
+		KeyGenerator: func(c *fiber.Ctx) string {
+			// Get URL with query string to use as cache key
+			url := c.Request().URI().String()
+			// Include the query parameters in the cache key
+			return url
+		},
 	}))
-
-	app.Get("/", func(c *fiber.Ctx) error {
-		return c.SendString("This is the Norsky feed generator for listing Norwegian posts on Bluesky.")
-	})
 
 	// Well known
 	app.Get("/.well-known/did.json", func(c *fiber.Ctx) error {
@@ -132,6 +167,62 @@ func Server(config *ServerConfig) *fiber.App {
 		}
 
 		return c.Status(400).SendString("Invalid feed")
+	})
+
+	app.Get("/dashboard/posts-per-hour", func(c *fiber.Ctx) error {
+		// Get the feed query parameters and parse the limit
+		lang := c.Query("lang", "")
+		if lang == "" {
+			lang = "no"
+		}
+
+		// Get the posts per hour
+		postsPerHour, err := config.Reader.GetPostCountPerHour(lang)
+		if err != nil {
+			log.WithFields(log.Fields{
+				"error": err,
+			}).Error("Error getting posts per hour")
+
+			return c.Status(500).SendString("Error getting posts per hour")
+		}
+
+		log.WithFields(log.Fields{
+			"lang":  lang,
+			"count": len(postsPerHour),
+		}).Info("Get posts per hour")
+
+		return c.JSON(postsPerHour)
+	})
+
+	app.Get("/dashboard/feed", func(c *fiber.Ctx) error {
+		// Make a server sent event stream of the feed
+		c.Set("Content-Type", "text/event-stream")
+		c.Set("Cache-Control", "no-cache")
+		c.Set("Connection", "keep-alive")
+		c.Set("Transfer-Encoding", "chunked")
+
+		c.Context().SetBodyStreamWriter(fasthttp.StreamWriter(func(w *bufio.Writer) {
+			var i int
+			for {
+				i++
+				msg := fmt.Sprintf("%d", i)
+				fmt.Fprintf(w, "data: Message: %s\n\n", msg)
+				fmt.Println(msg)
+
+				err := w.Flush()
+				if err != nil {
+					// Refreshing page in web browser will establish a new
+					// SSE connection, but only (the last) one is alive, so
+					// dead connections must be closed here.
+					fmt.Printf("Error while flushing: %v. Closing http connection.\n", err)
+
+					break
+				}
+				time.Sleep(2 * time.Second)
+			}
+		}))
+
+		return nil
 
 	})
 

@@ -7,7 +7,7 @@ permissions:
   contents: write
 
 jobs:
-  goreleaser:
+  build:
     runs-on: ubuntu-latest
     steps:
       -
@@ -15,6 +15,13 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      -
+        name: Set up bun
+        uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: latest
+
       -
         name: Set up Go
         uses: actions/setup-go@v4
@@ -22,6 +29,13 @@ jobs:
           go-version: "1.21.1"
 
       -
+        name: Install dependencies
+        run: bun install
+
+      - 
+        name: Build Vite frontend for production with bun runtime
+        run: bun run build
+          
+      -
         name: Check that go build works
-        run: |
-          go build -o norsky
+        run: go build -o norsky

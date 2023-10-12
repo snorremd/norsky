@@ -1,5 +1,7 @@
 package models
 
+import "time"
+
 // Post model with key fields from the post
 type Post struct {
 	Id        int64    `json:"-"`
@@ -27,4 +29,9 @@ type DeletePostEvent struct {
 type FeedResponse struct {
 	Feed   []Post  `json:"feed"`
 	Cursor *string `json:"cursor"`
+}
+
+type PostsAggregatedByTime struct {
+	Time  time.Time `json:"time"`
+	Count int64     `json:"count"`
 }
