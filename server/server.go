@@ -15,6 +15,7 @@ import (
 	"github.com/bluesky-social/indigo/atproto/syntax"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cache"
+	"github.com/gofiber/fiber/v2/middleware/compress"
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	"github.com/gofiber/fiber/v2/middleware/filesystem"
 	log "github.com/sirupsen/logrus"
@@ -37,6 +38,8 @@ type ServerConfig struct {
 func Server(config *ServerConfig) *fiber.App {
 
 	app := fiber.New()
+
+	app.Use(compress.New())
 
 	// Setup CORS for localhost:3001
 	app.Use(func(c *fiber.Ctx) error {
