@@ -191,7 +191,7 @@ func Server(config *ServerConfig) *fiber.App {
 			"count": len(postsPerHour),
 		}).Info("Get posts per hour")
 
-		return c.JSON(postsPerHour)
+		return c.Status(200).JSON(postsPerHour)
 	})
 
 	app.Get("/dashboard/feed", func(c *fiber.Ctx) error {
