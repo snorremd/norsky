@@ -44,7 +44,7 @@ func Server(config *ServerConfig) *fiber.App {
 	// Setup CORS for localhost:3001
 	app.Use(func(c *fiber.Ctx) error {
 		corsConfig := cors.Config{
-			AllowOrigins:     "http://localhost:3001",
+			AllowOrigins:     "*",
 			AllowCredentials: true,
 		}
 		return cors.New(corsConfig)(c)
