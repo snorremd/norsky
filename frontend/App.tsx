@@ -14,7 +14,7 @@ import 'chartjs-adapter-date-fns';
 import icon from "../assets/favicon.png";
 
 // Get the URL from the import.meta object
-const url = import.meta.env.BASE_URL;
+const host = import.meta.env.VITE_API_HOST;
 
 const mapData = (data: any) => {
   const mapped = data?.map(({ time, count }: any) => ({ x: time, y: count })).slice(data.length - 24, data.length)?? []
@@ -121,7 +121,7 @@ const PostPerHour: Component<{ lang: string, label: string }> = ({ lang, label }
   // Create a new resource signal to fetch data from the API
   // That is createResource('http://localhost:3000/dashboard/posts-per-hour');
   const [data] = createResource(
-    `http://localhost:3000/dashboard/posts-per-hour?lang=${lang}`,
+    `${host}/dashboard/posts-per-hour?lang=${lang}`,
     fetcher
   );
   return (

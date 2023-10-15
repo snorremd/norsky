@@ -54,7 +54,7 @@ jobs:
         name: Build Vite frontend for production with bun runtime
         env:
           ## This is the URL the Solid app will use to make API calls
-          VITE_API_URL: https://norsky.snorre.io
+          VITE_API_HOST: https://norsky.snorre.io
         run: bun run build
         
 
