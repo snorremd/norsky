@@ -172,9 +172,6 @@ func Server(config *ServerConfig) *fiber.App {
 	app.Get("/dashboard/posts-per-hour", func(c *fiber.Ctx) error {
 		// Get the feed query parameters and parse the limit
 		lang := c.Query("lang", "")
-		if lang == "" {
-			lang = "no"
-		}
 
 		// Get the posts per hour
 		postsPerHour, err := config.Reader.GetPostCountPerHour(lang)
