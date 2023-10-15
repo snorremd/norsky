@@ -50,14 +50,6 @@ func Server(config *ServerConfig) *fiber.App {
 		return cors.New(corsConfig)(c)
 	})
 
-	// Serve the Solid dashboard
-	app.Use("/", filesystem.New(filesystem.Config{
-		Browse:     false,
-		Index:      "index.html",
-		Root:       http.FS(dist),
-		PathPrefix: "/dist",
-	}))
-
 	// Serve the assets
 
 	// Middleware to track the latency of each request
@@ -225,6 +217,14 @@ func Server(config *ServerConfig) *fiber.App {
 		return nil
 
 	})
+
+	// Serve the Solid dashboard
+	app.Use("/", filesystem.New(filesystem.Config{
+		Browse:     false,
+		Index:      "index.html",
+		Root:       http.FS(dist),
+		PathPrefix: "/dist",
+	}))
 
 	return app
 }
