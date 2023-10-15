@@ -4,6 +4,7 @@ go 1.21.1
 
 require (
 	github.com/bluesky-social/indigo v0.0.0-20230919180850-251fff6498dc
+	github.com/cenkalti/backoff/v4 v4.2.1
 	github.com/cqroot/prompt v0.9.1
 	github.com/gofiber/fiber/v2 v2.49.2
 	github.com/golang-migrate/migrate/v4 v4.16.2
@@ -14,6 +15,7 @@ require (
 	github.com/sirupsen/logrus v1.9.3
 	github.com/strideynet/bsky-furry-feed v0.0.37
 	github.com/urfave/cli/v2 v2.25.1
+	github.com/valyala/fasthttp v1.49.0
 	golang.org/x/crypto/x509roots/fallback v0.0.0-20230928175846-ec07f4e35b9e
 )
 
@@ -22,7 +24,6 @@ require (
 	github.com/atotto/clipboard v0.1.4 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
-	github.com/cenkalti/backoff/v4 v4.2.1 // indirect
 	github.com/cespare/xxhash/v2 v2.2.0 // indirect
 	github.com/charmbracelet/bubbles v0.16.1 // indirect
 	github.com/charmbracelet/bubbletea v0.24.2 // indirect
@@ -89,6 +90,7 @@ require (
 	github.com/multiformats/go-multihash v0.2.1 // indirect
 	github.com/multiformats/go-varint v0.0.7 // indirect
 	github.com/opentracing/opentracing-go v1.2.0 // indirect
+	github.com/philhofer/fwd v1.1.2 // indirect
 	github.com/polydawn/refmt v0.89.1-0.20221221234430-40501e09de1f // indirect
 	github.com/prometheus/client_golang v1.14.0 // indirect
 	github.com/prometheus/client_model v0.3.0 // indirect
@@ -98,8 +100,8 @@ require (
 	github.com/rivo/uniseg v0.2.0 // indirect
 	github.com/russross/blackfriday/v2 v2.1.0 // indirect
 	github.com/spaolacci/murmur3 v1.1.0 // indirect
+	github.com/tinylib/msgp v1.1.8 // indirect
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
-	github.com/valyala/fasthttp v1.49.0 // indirect
 	github.com/valyala/fasttemplate v1.2.2 // indirect
 	github.com/valyala/tcplisten v1.0.0 // indirect
 	github.com/whyrusleeping/cbor-gen v0.0.0-20230818171029-f91ae536ca25 // indirect

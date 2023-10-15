@@ -65,7 +65,7 @@ Registers the feed with your preferred name, description, etc.`,
 			}
 
 			// Get the feed avatar from file
-			f, err := os.Open("./server/assets/avatar.png")
+			f, err := os.Open("./assets/avatar.png")
 			if err != nil {
 				return fmt.Errorf("could not open avatar file: %w", err)
 			}
