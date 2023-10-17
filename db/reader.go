@@ -3,6 +3,7 @@ package db
 import (
 	"database/sql"
 	"norsky/models"
+	"strconv"
 	"strings"
 	"time"
 
@@ -71,16 +72,55 @@ func (reader *Reader) GetFeed(lang string, limit int, postId int64) ([]models.Po
 }
 
 // Returns the number of posts for each hour of the day from the last 24 hours
-func (reader *Reader) GetPostCountPerHour(lang string) ([]models.PostsAggregatedByTime, error) {
-	timeAgg := "STRFTIME('%Y-%m-%d-%H', created_at, 'unixepoch')"
+func (reader *Reader) GetPostCountPerTime(lang string, timeAgg string) ([]models.PostsAggregatedByTime, error) {
+	var sqlFormat string
+	var timeParse func(string) (time.Time, error)
+
+	switch timeAgg {
+	case "hour":
+		sqlFormat = `STRFTIME('%Y-%m-%d-%H', created_at, 'unixepoch')`
+		timeParse = func(str string) (time.Time, error) {
+			return time.Parse("2006-01-02-15", str)
+		}
+	case "day":
+		sqlFormat = `STRFTIME('%Y-%m-%d', created_at, 'unixepoch')`
+		timeParse = func(str string) (time.Time, error) {
+			return time.Parse("2006-01-02", str)
+		}
+	case "week":
+		sqlFormat = "STRFTIME('%Y-%W', created_at, 'unixepoch')"
+		timeParse = func(str string) (time.Time, error) {
+			// Manually parse year and week number as separate integers
+			year, err := time.Parse("2006", str[:4])
+			if err != nil {
+				return time.Time{}, err
+			}
+			week, err := strconv.ParseInt(str[5:], 10, 64)
+			if err != nil {
+				return time.Time{}, err
+			}
+
+			_, weekOffset := year.ISOWeek()
+			weekOffset = weekOffset - 1
+			firstDay := year.AddDate(0, 0, -int(year.Weekday())+weekOffset*7)
+
+			// Add the number of weeks to the first day of the week
+			return firstDay.AddDate(0, 0, int(week)*7), nil
+		}
+	default:
+		sqlFormat = `STRFTIME('%Y-%m-%d-%H', created_at, 'unixepoch')`
+		timeParse = func(str string) (time.Time, error) {
+			return time.Parse("2006-01-02-15", str)
+		}
+	}
 
 	sb := sqlbuilder.NewSelectBuilder()
-	sb.Select(timeAgg, "count(*) as count").From("posts").GroupBy(timeAgg)
+	sb.Select(sqlFormat, "count(*) as count").From("posts").GroupBy(sqlFormat)
 	if lang != "" {
 		sb.Join("post_languages", "posts.id = post_languages.post_id")
 		sb.Where(sb.Equal("language", lang))
 	}
-	sb.GroupBy("strftime('%H', datetime(created_at, 'unixepoch'))")
+	sb.GroupBy(sqlFormat)
 	sb.OrderBy("created_at").Asc()
 
 	sql, args := sb.BuildWithFlavor(sqlbuilder.Flavor(sqlbuilder.SQLite))
@@ -99,14 +139,14 @@ func (reader *Reader) GetPostCountPerHour(lang string) ([]models.PostsAggregated
 	var postCounts []models.PostsAggregatedByTime
 
 	for rows.Next() {
-		var hour string
+		var sqlTime string
 		var postCount models.PostsAggregatedByTime
 
-		if err := rows.Scan(&hour, &postCount.Count); err != nil {
+		if err := rows.Scan(&sqlTime, &postCount.Count); err != nil {
 			continue // Skip this row
 		}
 		// Parse from YYYY-MM-DD-HH
-		postTime, error := time.Parse("2006-01-02-15", hour)
+		postTime, error := timeParse(sqlTime)
 
 		if error == nil {
 			postCount.Time = postTime

@@ -164,26 +164,36 @@ func Server(config *ServerConfig) *fiber.App {
 		return c.Status(400).SendString("Invalid feed")
 	})
 
-	app.Get("/dashboard/posts-per-hour", func(c *fiber.Ctx) error {
+	app.Get("/dashboard/posts-per-time", func(c *fiber.Ctx) error {
 		// Get the feed query parameters and parse the limit
 		lang := c.Query("lang", "")
+		time := c.Query("time", "")
 
-		// Get the posts per hour
-		postsPerHour, err := config.Reader.GetPostCountPerHour(lang)
+		if time == "" {
+			time = "hour"
+		}
+
+		// check if time is hour, day or week
+		if time != "hour" && time != "day" && time != "week" {
+			return c.Status(400).SendString("Invalid time")
+		}
+
+		// Get posts per time
+		postsPerTime, err := config.Reader.GetPostCountPerTime(lang, time)
 		if err != nil {
 			log.WithFields(log.Fields{
 				"error": err,
-			}).Error("Error getting posts per hour")
+			}).Error("Error getting posts per time")
 
-			return c.Status(500).SendString("Error getting posts per hour")
+			return c.Status(500).SendString("Error getting posts per time")
 		}
 
 		log.WithFields(log.Fields{
 			"lang":  lang,
-			"count": len(postsPerHour),
-		}).Info("Get posts per hour")
+			"count": len(postsPerTime),
+		}).Info("Get posts per time")
 
-		return c.Status(200).JSON(postsPerHour)
+		return c.Status(200).JSON(postsPerTime)
 	})
 
 	app.Get("/dashboard/feed", func(c *fiber.Ctx) error {
