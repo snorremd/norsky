@@ -37,7 +37,7 @@ func genericAlgo(reader *db.Reader, cursor string, limit int, lang string) (*mod
 	}
 
 	if posts == nil {
-		posts = []models.Post{}
+		posts = []models.FeedPost{}
 	}
 
 	var nextCursor *string

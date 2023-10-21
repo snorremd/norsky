@@ -6,7 +6,7 @@ require (
 	github.com/bluesky-social/indigo v0.0.0-20230919180850-251fff6498dc
 	github.com/cenkalti/backoff/v4 v4.2.1
 	github.com/cqroot/prompt v0.9.1
-	github.com/gofiber/fiber/v2 v2.49.2
+	github.com/gofiber/fiber/v2 v2.50.0
 	github.com/golang-migrate/migrate/v4 v4.16.2
 	github.com/gorilla/websocket v1.5.0
 	github.com/huandu/go-sqlbuilder v1.22.0
@@ -15,7 +15,7 @@ require (
 	github.com/sirupsen/logrus v1.9.3
 	github.com/strideynet/bsky-furry-feed v0.0.37
 	github.com/urfave/cli/v2 v2.25.1
-	github.com/valyala/fasthttp v1.49.0
+	github.com/valyala/fasthttp v1.50.0
 	golang.org/x/crypto/x509roots/fallback v0.0.0-20230928175846-ec07f4e35b9e
 )
 
@@ -116,7 +116,7 @@ require (
 	golang.org/x/exp v0.0.0-20230510235704-dd950f8aeaea // indirect
 	golang.org/x/mod v0.12.0 // indirect
 	golang.org/x/sync v0.3.0 // indirect
-	golang.org/x/sys v0.12.0 // indirect
+	golang.org/x/sys v0.13.0 // indirect
 	golang.org/x/term v0.11.0 // indirect
 	golang.org/x/text v0.12.0 // indirect
 	golang.org/x/time v0.3.0 // indirect

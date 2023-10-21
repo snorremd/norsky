@@ -4,11 +4,17 @@ import "time"
 
 // Post model with key fields from the post
 type Post struct {
-	Id        int64    `json:"-"`
-	Uri       string   `json:"post"`
-	CreatedAt int64    `json:"-"`
-	Text      string   `json:"-"`
-	Languages []string `json:"-"`
+	Id        int64    `json:"id"`
+	CreatedAt int64    `json:"createdAt"`
+	Text      string   `json:"text"`
+	Languages []string `json:"languages"`
+	Uri       string   `json:"uri"`
+}
+
+// Omit all but the Uri field
+type FeedPost struct {
+	Id  int64  `json:"-"`
+	Uri string `json:"post"`
 }
 
 // CreateEvent fired when a new post is created
@@ -27,8 +33,8 @@ type DeletePostEvent struct {
 }
 
 type FeedResponse struct {
-	Feed   []Post  `json:"feed"`
-	Cursor *string `json:"cursor"`
+	Feed   []FeedPost `json:"feed"`
+	Cursor *string    `json:"cursor"`
 }
 
 type PostsAggregatedByTime struct {

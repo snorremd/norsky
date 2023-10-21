@@ -75,6 +75,7 @@ func (firehose *Firehose) Subscribe() {
 }
 
 func (firehose *Firehose) Shutdown() {
+	// TODO: Graceful shutdown here as "Error handling repo stream: read tcp use of closed network connection "
 	firehose.scheduler.Shutdown()
 	firehose.conn.Close()
 	fmt.Println("Firehose shutdown")

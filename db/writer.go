@@ -39,11 +39,10 @@ func (writer *Writer) Subscribe() {
 			}
 
 		case post := <-writer.postChan:
-			log.WithField("post", post).Info("Received post")
 			switch post := post.(type) {
-			case models.CreatePostEvent:
+			case *models.CreatePostEvent:
 				createPost(writer.db, post.Post)
-			case models.DeletePostEvent:
+			case *models.DeletePostEvent:
 				deletePost(writer.db, post.Post)
 			default:
 				log.Info("Unknown post type")

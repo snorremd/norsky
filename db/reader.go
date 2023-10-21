@@ -4,11 +4,9 @@ import (
 	"database/sql"
 	"norsky/models"
 	"strconv"
-	"strings"
 	"time"
 
 	sqlbuilder "github.com/huandu/go-sqlbuilder"
-	log "github.com/sirupsen/logrus"
 )
 
 type Reader struct {
@@ -26,12 +24,12 @@ func NewReader(database string) *Reader {
 	}
 }
 
-func (reader *Reader) GetFeed(lang string, limit int, postId int64) ([]models.Post, error) {
+func (reader *Reader) GetFeed(lang string, limit int, postId int64) ([]models.FeedPost, error) {
 
 	// Return next limit posts after cursor, ordered by created_at and uri
 
 	sb := sqlbuilder.NewSelectBuilder()
-	sb.Select("id", "uri", "created_at", "group_concat(language)").From("posts")
+	sb.Select("id", "uri").From("posts")
 	if postId != 0 {
 		sb.Where(
 			sb.LessThan("id", postId),
@@ -53,18 +51,15 @@ func (reader *Reader) GetFeed(lang string, limit int, postId int64) ([]models.Po
 	defer rows.Close()
 
 	// Scan rows, collapse languages into single post
-	var posts []models.Post
+	var posts []models.FeedPost
 
 	for rows.Next() {
-		var post models.Post
-		var langs string
+		var post models.FeedPost
 		// Scan row and
-		if err := rows.Scan(&post.Id, &post.Uri, &post.CreatedAt, &langs); err != nil {
+		if err := rows.Scan(&post.Id, &post.Uri); err != nil {
 			return nil, err
 		}
 
-		// Split languages into a slice and add to the post model
-		post.Languages = strings.Split(langs, ",")
 		posts = append(posts, post)
 	}
 
@@ -124,11 +119,6 @@ func (reader *Reader) GetPostCountPerTime(lang string, timeAgg string) ([]models
 	sb.OrderBy("created_at").Asc()
 
 	sql, args := sb.BuildWithFlavor(sqlbuilder.Flavor(sqlbuilder.SQLite))
-
-	log.WithFields(log.Fields{
-		"sql":  sql,
-		"args": args,
-	}).Info("Get posts per hour")
 
 	rows, err := reader.db.Query(sql, args...)
 	if err != nil {

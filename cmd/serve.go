@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"norsky/db"
 	"norsky/firehose"
+	"norsky/models"
 	"norsky/server"
 	"os"
 	"os/signal"
@@ -80,26 +81,48 @@ func serveCmd() *cli.Command {
 
 			// Channel for subscribing to bluesky posts
 			postChan := make(chan interface{})
+			dbPostChan := make(chan interface{}) // Channel for writing posts to the database
+			broadcaster := server.NewBroadcaster()
 
 			// Setup the server and firehose
 			app := server.Server(&server.ServerConfig{
-				Hostname: hostname,
-				Reader:   db.NewReader(database),
+				Hostname:    hostname,
+				Reader:      db.NewReader(database),
+				Broadcaster: broadcaster,
 			})
 			fh := firehose.New(postChan, ctx.Context)
-			dbwriter := db.NewWriter(database, postChan)
+
+			dbwriter := db.NewWriter(database, dbPostChan)
 
 			// Graceful shutdown via wait group
 			c := make(chan os.Signal, 1)
 			signal.Notify(c, os.Interrupt)
 			var wg sync.WaitGroup
 
+			// Graceful shutdown logic
 			go func() {
 				<-c
 				fmt.Println("Gracefully shutting down...")
-				app.ShutdownWithTimeout(60 * time.Second)
-				defer wg.Add(-3) // Decrement the waitgroup counter by 2 after shutdown of server and firehose
+				app.ShutdownWithTimeout(5 * time.Second) // Wait 5 seconds for all connections to close
 				fh.Shutdown()
+				broadcaster.Shutdown()
+				defer wg.Add(-4) // Decrement the waitgroup counter by 2 after shutdown of server and firehose
+
+			}()
+
+			// Some glue code to pass posts from the firehose to the database and/or broadcaster
+			// Ideally one might want to do this in a more elegant way
+			// TODO: Move broadcaster into server package, i.e. make server a receiver and handle broadcaster and fiber together
+			go func() {
+				for post := range postChan {
+					switch post := post.(type) {
+					case models.CreatePostEvent:
+						dbPostChan <- post
+						broadcaster.Broadcast(post) // Broadcast new post to SSE clients
+					default:
+						dbPostChan <- post
+					}
+				}
 			}()
 
 			go func() {
@@ -109,6 +132,7 @@ func serveCmd() *cli.Command {
 
 			go func() {
 				fmt.Println("Starting server...")
+
 				if err := app.Listen(fmt.Sprintf("%s:%d", host, port)); err != nil {
 					log.Error(err)
 					c <- os.Interrupt
@@ -121,13 +145,12 @@ func serveCmd() *cli.Command {
 			}()
 
 			// Wait for both the server and firehose to shutdown
-			wg.Add(3)
+			wg.Add(4)
 			wg.Wait()
 
 			log.Info("Norsky feed generator stopped")
 
 			return nil
-
 		},
 	}
 }
