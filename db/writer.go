@@ -40,9 +40,9 @@ func (writer *Writer) Subscribe() {
 
 		case post := <-writer.postChan:
 			switch post := post.(type) {
-			case *models.CreatePostEvent:
+			case models.CreatePostEvent:
 				createPost(writer.db, post.Post)
-			case *models.DeletePostEvent:
+			case models.DeletePostEvent:
 				deletePost(writer.db, post.Post)
 			default:
 				log.Info("Unknown post type")
@@ -53,6 +53,9 @@ func (writer *Writer) Subscribe() {
 }
 
 func createPost(db *sql.DB, post models.Post) error {
+	log.WithFields(log.Fields{
+		"uri": post.Uri,
+	}).Info("Creating post")
 	// Post insert query
 	insertPost := sqlbuilder.NewInsertBuilder()
 	sql, args := insertPost.InsertInto("posts").Cols("uri", "created_at").Values(post.Uri, post.CreatedAt).Build()
