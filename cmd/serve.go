@@ -81,8 +81,8 @@ func serveCmd() *cli.Command {
 
 			// Channel for subscribing to bluesky posts
 			postChan := make(chan interface{})
-			dbPostChan := make(chan interface{}) // Channel for writing posts to the database
-			broadcaster := server.NewBroadcaster()
+			dbPostChan := make(chan interface{})   // Channel for writing posts to the database
+			broadcaster := server.NewBroadcaster() // SSE broadcaster
 
 			// Setup the server and firehose
 			app := server.Server(&server.ServerConfig{
@@ -106,7 +106,7 @@ func serveCmd() *cli.Command {
 				app.ShutdownWithTimeout(5 * time.Second) // Wait 5 seconds for all connections to close
 				fh.Shutdown()
 				broadcaster.Shutdown()
-				defer wg.Add(-4) // Decrement the waitgroup counter by 2 after shutdown of server and firehose
+				defer wg.Add(-4) // Decrement the waitgroup counter by 4 after shutdown of all processes
 
 			}()
 

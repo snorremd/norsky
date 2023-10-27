@@ -78,7 +78,7 @@ func (firehose *Firehose) Shutdown() {
 	// TODO: Graceful shutdown here as "Error handling repo stream: read tcp use of closed network connection "
 	firehose.scheduler.Shutdown()
 	firehose.conn.Close()
-	fmt.Println("Firehose shutdown")
+	log.Info("Firehose shutdown")
 }
 
 func eventProcessor(postChan chan interface{}, context context.Context) *events.RepoStreamCallbacks {
@@ -86,7 +86,8 @@ func eventProcessor(postChan chan interface{}, context context.Context) *events.
 		RepoCommit: func(evt *atproto.SyncSubscribeRepos_Commit) error {
 			rr, err := repo.ReadRepoFromCar(context, bytes.NewReader(evt.Blocks))
 			if err != nil {
-				return err
+				log.Errorf("Error reading repo from car: %s", err)
+				return nil
 			}
 			// Get operations by type
 			for _, op := range evt.Ops {
