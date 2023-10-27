@@ -19,7 +19,7 @@ func Tidy(database string) error {
 }
 
 func tidy(db *sql.DB) error {
-	ninetyDaysAgo := time.Now().Add(90 * 24 * time.Hour).Unix()
+	ninetyDaysAgo := time.Now().Add(90 * 24 * -1 * time.Hour).Unix()
 	deletePosts := sb.NewDeleteBuilder()
 	sql, args := deletePosts.DeleteFrom("posts").Where(deletePosts.LessEqualThan("created_at", ninetyDaysAgo)).Build()
 
@@ -28,10 +28,10 @@ func tidy(db *sql.DB) error {
 		"args": args,
 	}).Info("Tidying database")
 
-	// _, err := db.Exec(sql, args...)
-	// if err != nil {
-	// 	return err
-	// }
+	_, err := db.Exec(sql, args...)
+	if err != nil {
+		return err
+	}
 
 	return nil
 }

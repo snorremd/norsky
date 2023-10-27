@@ -30,6 +30,11 @@ func NewWriter(database string, postChan chan interface{}) *Writer {
 }
 
 func (writer *Writer) Subscribe() {
+	// Tidy database immediately
+	if err := tidy(writer.db); err != nil {
+		log.Error("Error tidying database", err)
+	}
+
 	for {
 		select {
 		case <-writer.tidyChan.C:
