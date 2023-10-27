@@ -44,17 +44,34 @@ func (writer *Writer) Subscribe() {
 			}
 
 		case post := <-writer.postChan:
-			switch post := post.(type) {
+			switch event := post.(type) {
+			case models.ProcessSeqEvent:
+				processSeq(writer.db, event)
 			case models.CreatePostEvent:
-				createPost(writer.db, post.Post)
+				createPost(writer.db, event.Post)
 			case models.DeletePostEvent:
-				deletePost(writer.db, post.Post)
+				deletePost(writer.db, event.Post)
 			default:
 				log.Info("Unknown post type")
 			}
 		}
 
 	}
+}
+
+func processSeq(db *sql.DB, evt models.ProcessSeqEvent) error {
+	log.Info("Processing sequence")
+	// Update sequence row with new seq number
+	updateSeq := sqlbuilder.NewUpdateBuilder()
+	sql, args := updateSeq.Update("sequence").Set(updateSeq.Assign("seq", evt.Seq)).Where(updateSeq.Equal("id", 0)).Build()
+
+	_, err := db.Exec(sql, args...)
+	if err != nil {
+		log.Error("Error updating sequence", err)
+		return err
+	}
+
+	return nil
 }
 
 func createPost(db *sql.DB, post models.Post) error {

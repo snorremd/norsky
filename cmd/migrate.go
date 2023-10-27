@@ -32,3 +32,26 @@ func migrateCmd() *cli.Command {
 		},
 	}
 }
+
+func rollbackCmd() *cli.Command {
+	return &cli.Command{
+		Name:        "rollback",
+		Usage:       "Rollback database migration",
+		Description: `Rolls back the last database migration`,
+		Flags: []cli.Flag{
+			&cli.StringFlag{
+				Name:    "database",
+				Aliases: []string{"d"},
+				Value:   "feed.db",
+				Usage:   "SQLite database file location",
+				EnvVars: []string{"NORSKY_DATABASE"},
+			},
+		},
+		Action: func(ctx *cli.Context) error {
+			database := ctx.String("database")
+			fmt.Println("Database configured: ", database)
+			err := db.Rollback(database)
+			return err
+		},
+	}
+}

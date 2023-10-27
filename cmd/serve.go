@@ -84,13 +84,22 @@ func serveCmd() *cli.Command {
 			dbPostChan := make(chan interface{})   // Channel for writing posts to the database
 			broadcaster := server.NewBroadcaster() // SSE broadcaster
 
+			dbReader := db.NewReader(database)
+
+			seq, err := dbReader.GetSequence()
+
+			if err != nil {
+				log.Warn("Failed to get sequence from database, starting from 0")
+			}
+
 			// Setup the server and firehose
 			app := server.Server(&server.ServerConfig{
 				Hostname:    hostname,
-				Reader:      db.NewReader(database),
+				Reader:      dbReader,
 				Broadcaster: broadcaster,
 			})
-			fh := firehose.New(postChan, ctx.Context)
+
+			fh := firehose.New(postChan, ctx.Context, seq)
 
 			dbwriter := db.NewWriter(database, dbPostChan)
 

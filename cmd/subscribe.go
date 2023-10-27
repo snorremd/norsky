@@ -43,7 +43,7 @@ Prints all other log messages to stderr.`,
 			postChan := make(chan interface{})
 
 			// Setup the server and firehose
-			fh := firehose.New(postChan, context)
+			fh := firehose.New(postChan, context, -1)
 
 			// Graceful shutdown
 			c := make(chan os.Signal, 1)

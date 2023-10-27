@@ -35,10 +35,15 @@ type Firehose struct {
 	context context.Context
 }
 
-func New(postChan chan interface{}, context context.Context) *Firehose {
+func New(postChan chan interface{}, context context.Context, seq int64) *Firehose {
+	address := "wss://bsky.network/xrpc/com.atproto.sync.subscribeRepos"
+	if seq >= 0 {
+		log.Info("Starting from sequence: ", seq)
+		address = fmt.Sprintf("%s?cursor=%d", address, seq)
+	}
 	dialer := websocket.DefaultDialer
 	firehose := &Firehose{
-		address:  "wss://bsky.network/xrpc/com.atproto.sync.subscribeRepos",
+		address:  address,
 		dialer:   dialer,
 		postChan: postChan,
 		context:  context,
@@ -123,6 +128,10 @@ func eventProcessor(postChan chan interface{}, context context.Context) *events.
 
 					// Contains any of the languages in the post that are one of the following: nb, nn, smi
 					if lo.Some(post.Langs, []string{"no", "nb", "nn", "smi"}) {
+						// Keep track of what commits we have processed
+						postChan <- models.ProcessSeqEvent{
+							Seq: evt.Seq,
+						}
 						createdAt, err := time.Parse(time.RFC3339, post.CreatedAt)
 						if err == nil {
 							postChan <- models.CreatePostEvent{

@@ -146,3 +146,17 @@ func (reader *Reader) GetPostCountPerTime(lang string, timeAgg string) ([]models
 
 	return postCounts, nil
 }
+
+func (reader *Reader) GetSequence() (int64, error) {
+	// Get sequence number
+	selectSeq := sqlbuilder.NewSelectBuilder()
+	sql, args := selectSeq.Select("seq").From("sequence").Where(selectSeq.Equal("id", 0)).Build()
+
+	var seq int64
+	err := reader.db.QueryRow(sql, args...).Scan(&seq)
+	if err != nil {
+		return 0, err
+	}
+
+	return seq, nil
+}
