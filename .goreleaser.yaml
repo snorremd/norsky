@@ -20,8 +20,11 @@ builds:
       - -o
     goos:
       - linux
-      - windows
       - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
 
 archives:
   - format: tar.gz
