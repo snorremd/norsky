@@ -10,10 +10,6 @@ import (
 	"norsky/firehose"
 	"norsky/models"
 	"norsky/server"
-	"os"
-	"os/signal"
-	"sync"
-	"time"
 
 	log "github.com/sirupsen/logrus"
 	"github.com/urfave/cli/v2"
@@ -85,7 +81,6 @@ func serveCmd() *cli.Command {
 			broadcaster := server.NewBroadcaster() // SSE broadcaster
 
 			dbReader := db.NewReader(database)
-
 			seq, err := dbReader.GetSequence()
 
 			if err != nil {
@@ -98,26 +93,6 @@ func serveCmd() *cli.Command {
 				Reader:      dbReader,
 				Broadcaster: broadcaster,
 			})
-
-			fh := firehose.New(postChan, ctx.Context, seq)
-
-			dbwriter := db.NewWriter(database, dbPostChan)
-
-			// Graceful shutdown via wait group
-			c := make(chan os.Signal, 1)
-			signal.Notify(c, os.Interrupt)
-			var wg sync.WaitGroup
-
-			// Graceful shutdown logic
-			go func() {
-				<-c
-				fmt.Println("Gracefully shutting down...")
-				app.ShutdownWithTimeout(5 * time.Second) // Wait 5 seconds for all connections to close
-				fh.Shutdown()
-				broadcaster.Shutdown()
-				defer wg.Add(-4) // Decrement the waitgroup counter by 4 after shutdown of all processes
-
-			}()
 
 			// Some glue code to pass posts from the firehose to the database and/or broadcaster
 			// Ideally one might want to do this in a more elegant way
@@ -136,7 +111,7 @@ func serveCmd() *cli.Command {
 
 			go func() {
 				fmt.Println("Subscribing to firehose...")
-				fh.Subscribe()
+				firehose.Subscribe(ctx.Context, postChan, seq)
 			}()
 
 			go func() {
@@ -144,22 +119,25 @@ func serveCmd() *cli.Command {
 
 				if err := app.Listen(fmt.Sprintf("%s:%d", host, port)); err != nil {
 					log.Error(err)
-					c <- os.Interrupt
 				}
 			}()
 
 			go func() {
 				fmt.Println("Starting database writer...")
-				dbwriter.Subscribe()
+				db.Subscribe(ctx.Context, database, dbPostChan)
 			}()
 
-			// Wait for both the server and firehose to shutdown
-			wg.Add(4)
-			wg.Wait()
+			// Wait for SIGINT (Ctrl+C) or SIGTERM (docker stop) to stop the server
 
-			log.Info("Norsky feed generator stopped")
-
-			return nil
+			select {
+			case <-ctx.Context.Done():
+				log.Info("Stopping server")
+				if err := app.ShutdownWithContext(ctx.Context); err != nil {
+					log.Error(err)
+				}
+				log.Info("Norsky feed generator stopped")
+				return nil
+			}
 		},
 	}
 }

@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"norsky/models"
 	"time"
 
@@ -10,47 +11,39 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-type Writer struct {
-	db       *sql.DB
-	postChan chan interface{}
-	tidyChan *time.Ticker
-}
+func Subscribe(ctx context.Context, database string, postChan chan interface{}) {
+	tidyChan := time.NewTicker(5 * time.Minute)
 
-func NewWriter(database string, postChan chan interface{}) *Writer {
 	db, err := connection(database)
 	if err != nil {
-		panic("failed to connect database")
+		log.Error("Error connecting to database", err)
+		ctx.Done()
 	}
-	return &Writer{
-		db:       db,
-		postChan: postChan,
-		// Create new tidy channel that is pinged every 5 minutes
-		tidyChan: time.NewTicker(5 * time.Minute),
-	}
-}
 
-func (writer *Writer) Subscribe() {
 	// Tidy database immediately
-	if err := tidy(writer.db); err != nil {
+	if err := tidy(db); err != nil {
 		log.Error("Error tidying database", err)
 	}
 
 	for {
 		select {
-		case <-writer.tidyChan.C:
+		case <-ctx.Done():
+			log.Info("Stopping database writer")
+			return
+		case <-tidyChan.C:
 			log.Info("Tidying database")
-			if err := tidy(writer.db); err != nil {
+			if err := tidy(db); err != nil {
 				log.Error("Error tidying database", err)
 			}
 
-		case post := <-writer.postChan:
+		case post := <-postChan:
 			switch event := post.(type) {
 			case models.ProcessSeqEvent:
-				processSeq(writer.db, event)
+				processSeq(db, event)
 			case models.CreatePostEvent:
-				createPost(writer.db, event.Post)
+				createPost(db, event.Post)
 			case models.DeletePostEvent:
-				deletePost(writer.db, event.Post)
+				deletePost(db, event.Post)
 			default:
 				log.Info("Unknown post type")
 			}
@@ -60,7 +53,6 @@ func (writer *Writer) Subscribe() {
 }
 
 func processSeq(db *sql.DB, evt models.ProcessSeqEvent) error {
-	log.Info("Processing sequence")
 	// Update sequence row with new seq number
 	updateSeq := sqlbuilder.NewUpdateBuilder()
 	sql, args := updateSeq.Update("sequence").Set(updateSeq.Assign("seq", evt.Seq)).Where(updateSeq.Equal("id", 0)).Build()
