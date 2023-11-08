@@ -22,68 +22,42 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-// Add a firehose model to use as a receiver pattern for the firehose
-
-type Firehose struct {
-	address   string                // The address of the firehose
-	dialer    *websocket.Dialer     // The websocket dialer to use for the firehose
-	conn      *websocket.Conn       // The websocket connection to the firehose
-	scheduler *sequential.Scheduler // The scheduler to use for the firehose
-	// A channel to write feed posts to
-	postChan chan interface{}
-	// The context for this process
-	context context.Context
-}
-
-func New(postChan chan interface{}, context context.Context, seq int64) *Firehose {
+// Subscribe to the firehose using the Firehose struct as a receiver
+func Subscribe(ctx context.Context, postChan chan interface{}, seq int64) {
 	address := "wss://bsky.network/xrpc/com.atproto.sync.subscribeRepos"
 	if seq >= 0 {
 		log.Info("Starting from sequence: ", seq)
 		address = fmt.Sprintf("%s?cursor=%d", address, seq)
 	}
 	dialer := websocket.DefaultDialer
-	firehose := &Firehose{
-		address:  address,
-		dialer:   dialer,
-		postChan: postChan,
-		context:  context,
-	}
-
-	return firehose
-}
-
-// Subscribe to the firehose using the Firehose struct as a receiver
-func (firehose *Firehose) Subscribe() {
-
 	backoff := backoff.NewExponentialBackOff()
 
+	// Check if context is cancelled, if so exit the connection loop
 	for {
-		conn, _, err := firehose.dialer.Dial(firehose.address, nil)
-		if err != nil {
-			log.Errorf("Error connecting to firehose: %s", err)
-			time.Sleep(backoff.NextBackOff())
-			// Increase backoff by factor of 1.3, rounded to nearest whole number
-			continue
-		}
+		select {
+		case <-ctx.Done():
+			log.Info("Stopping firehose connect loop")
+			return
+		default:
+			conn, _, err := dialer.Dial(address, nil)
+			if err != nil {
+				log.Errorf("Error connecting to firehose: %s", err)
+				time.Sleep(backoff.NextBackOff())
+				// Increase backoff by factor of 1.3, rounded to nearest whole number
+				continue
+			}
 
-		firehose.conn = conn
-		firehose.scheduler = sequential.NewScheduler(conn.RemoteAddr().String(), eventProcessor(firehose.postChan, firehose.context).EventHandler)
-		err = events.HandleRepoStream(context.Background(), conn, firehose.scheduler)
+			scheduler := sequential.NewScheduler(conn.RemoteAddr().String(), eventProcessor(postChan, ctx).EventHandler)
+			err = events.HandleRepoStream(ctx, conn, scheduler)
 
-		// If error sleep
-		if err != nil {
-			log.Errorf("Error handling repo stream: %s", err)
-			time.Sleep(backoff.NextBackOff())
-			continue
+			// If error sleep
+			if err != nil {
+				log.Errorf("Error handling repo stream: %s", err)
+				time.Sleep(backoff.NextBackOff())
+				continue
+			}
 		}
 	}
-}
-
-func (firehose *Firehose) Shutdown() {
-	// TODO: Graceful shutdown here as "Error handling repo stream: read tcp use of closed network connection "
-	firehose.scheduler.Shutdown()
-	firehose.conn.Close()
-	log.Info("Firehose shutdown")
 }
 
 func eventProcessor(postChan chan interface{}, context context.Context) *events.RepoStreamCallbacks {

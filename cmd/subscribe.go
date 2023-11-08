@@ -4,14 +4,11 @@ Copyright © 2023 NAME HERE <EMAIL ADDRESS>
 package cmd
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"norsky/firehose"
 	"norsky/models"
 	"os"
-	"os/signal"
-	"sync"
 
 	log "github.com/sirupsen/logrus"
 	"github.com/urfave/cli/v2"
@@ -34,7 +31,6 @@ the output.
 Prints all other log messages to stderr.`,
 		Action: func(ctx *cli.Context) error {
 			// Get the context for this process to pass to firehose
-			context := context.Background()
 
 			// Disable logging to stdout
 			log.SetOutput(os.Stderr)
@@ -42,42 +38,31 @@ Prints all other log messages to stderr.`,
 			// Channel for subscribing to bluesky posts
 			postChan := make(chan interface{})
 
-			// Setup the server and firehose
-			fh := firehose.New(postChan, context, -1)
-
-			// Graceful shutdown
-			c := make(chan os.Signal, 1)
-			signal.Notify(c, os.Interrupt)
-			var wg sync.WaitGroup
-
-			go func() {
-				<-c
-				defer wg.Add(-1) // Decrement the waitgroup counter by 2 after shutdown of server and firehose
-				fh.Shutdown()
-			}()
-
 			go func() {
 				fmt.Println("Subscribing to firehose...")
-				fh.Subscribe()
+				firehose.Subscribe(ctx.Context, postChan, -1)
 			}()
 
 			go func() {
 				// Subscribe to the post channel and log the posts
+				// Stop if the context is cancelled
 				for message := range postChan {
-					switch message := message.(type) {
-					case models.CreatePostEvent:
-						printStdout(&message.Post)
-					case models.UpdatePostEvent:
-						printStdout(&message.Post)
-					case models.DeletePostEvent:
-						printStdout(&message.Post)
+					select {
+					case <-ctx.Context.Done():
+						fmt.Println("Stopping subscription")
+						return
+					default:
+						switch message := message.(type) {
+						case models.CreatePostEvent:
+							printStdout(&message.Post)
+						case models.UpdatePostEvent:
+							printStdout(&message.Post)
+						case models.DeletePostEvent:
+							printStdout(&message.Post)
+						}
 					}
 				}
 			}()
-
-			// Wait for both the server and firehose to shutdown
-			wg.Add(1)
-			wg.Wait()
 
 			return nil
 		},
