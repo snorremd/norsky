@@ -55,6 +55,7 @@ func serveCmd() *cli.Command {
 				Value:   3000,
 			},
 		},
+
 		Action: func(ctx *cli.Context) error {
 
 			log.Info("Starting Norsky feed generator")
@@ -100,9 +101,11 @@ func serveCmd() *cli.Command {
 			go func() {
 				for post := range postChan {
 					switch post := post.(type) {
+					// Don't crash if broadcast fails
 					case models.CreatePostEvent:
 						dbPostChan <- post
-						broadcaster.Broadcast(post) // Broadcast new post to SSE clients
+						// Broadcast without blocking
+						go broadcaster.Broadcast(post) // Broadcast new post to SSE clients
 					default:
 						dbPostChan <- post
 					}

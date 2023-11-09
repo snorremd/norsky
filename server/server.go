@@ -59,9 +59,6 @@ func (b *Broadcaster) Broadcast(post models.CreatePostEvent) {
 	log.WithFields(log.Fields{
 		"clients": len(b.clients),
 	}).Info("Broadcasting post to SSE clients")
-
-	b.Lock()
-	defer b.Unlock()
 	for _, client := range b.clients {
 		client <- post
 	}
@@ -82,8 +79,12 @@ func (b *Broadcaster) AddClient(key string, client chan models.CreatePostEvent) 
 func (b *Broadcaster) RemoveClient(key string) {
 	b.Lock()
 	defer b.Unlock()
+	// Check if client channel exists in map
 	if _, ok := b.clients[key]; !ok {
-		close(b.clients[key])
+		// Close the channel unless it's already closed
+		if b.clients[key] != nil {
+			close(b.clients[key])
+		}
 		delete(b.clients, key)
 	}
 
