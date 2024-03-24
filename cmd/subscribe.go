@@ -9,6 +9,7 @@ import (
 	"norsky/firehose"
 	"norsky/models"
 	"os"
+	"time"
 
 	log "github.com/sirupsen/logrus"
 	"github.com/urfave/cli/v2"
@@ -38,9 +39,11 @@ Prints all other log messages to stderr.`,
 			// Channel for subscribing to bluesky posts
 			postChan := make(chan interface{})
 
+			ticker := time.NewTicker(5 * time.Minute)
+
 			go func() {
 				fmt.Println("Subscribing to firehose...")
-				firehose.Subscribe(ctx.Context, postChan, -1)
+				firehose.Subscribe(ctx.Context, postChan, ticker, -1)
 			}()
 
 			go func() {
