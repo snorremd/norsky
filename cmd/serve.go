@@ -4,12 +4,14 @@ Copyright © 2023 NAME HERE <EMAIL ADDRESS>
 package cmd
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"norsky/db"
 	"norsky/firehose"
 	"norsky/models"
 	"norsky/server"
+	"time"
 
 	log "github.com/sirupsen/logrus"
 	"github.com/urfave/cli/v2"
@@ -77,6 +79,9 @@ func serveCmd() *cli.Command {
 			}
 
 			// Channel for subscribing to bluesky posts
+			// Create new child context for the firehose connection
+			firehoseCtx := context.Context(ctx.Context)
+			livenessTicker := time.NewTicker(5 * time.Minute)
 			postChan := make(chan interface{})
 			dbPostChan := make(chan interface{})   // Channel for writing posts to the database
 			broadcaster := server.NewBroadcaster() // SSE broadcaster
@@ -114,7 +119,20 @@ func serveCmd() *cli.Command {
 
 			go func() {
 				fmt.Println("Subscribing to firehose...")
-				firehose.Subscribe(ctx.Context, postChan, seq)
+				firehose.Subscribe(firehoseCtx, postChan, livenessTicker, seq)
+			}()
+
+			// Add liveness probe to the server, to check if we are still receiving posts on the web socket
+			// If not we need to restart the firehose connection
+
+			go func() {
+				for range livenessTicker.C {
+					// If we get here the firehose stopped sending posts so we need to restart the connection
+					log.Errorf("Firehose liveness probe failed, restarting connection")
+					firehoseCtx.Done()
+					firehoseCtx = context.Context(ctx.Context)
+					firehose.Subscribe(firehoseCtx, postChan, livenessTicker, seq)
+				}
 			}()
 
 			go func() {
@@ -132,15 +150,14 @@ func serveCmd() *cli.Command {
 
 			// Wait for SIGINT (Ctrl+C) or SIGTERM (docker stop) to stop the server
 
-			select {
-			case <-ctx.Context.Done():
-				log.Info("Stopping server")
-				if err := app.ShutdownWithContext(ctx.Context); err != nil {
-					log.Error(err)
-				}
-				log.Info("Norsky feed generator stopped")
-				return nil
+			<-ctx.Context.Done()
+
+			log.Info("Stopping server")
+			if err := app.ShutdownWithContext(ctx.Context); err != nil {
+				log.Error(err)
 			}
+			log.Info("Norsky feed generator stopped")
+			return nil
 		},
 	}
 }

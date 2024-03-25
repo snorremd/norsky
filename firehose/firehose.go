@@ -23,7 +23,7 @@ import (
 )
 
 // Subscribe to the firehose using the Firehose struct as a receiver
-func Subscribe(ctx context.Context, postChan chan interface{}, seq int64) {
+func Subscribe(ctx context.Context, postChan chan interface{}, ticker *time.Ticker, seq int64) {
 	address := "wss://bsky.network/xrpc/com.atproto.sync.subscribeRepos"
 	if seq >= 0 {
 		log.Info("Starting from sequence: ", seq)
@@ -47,7 +47,7 @@ func Subscribe(ctx context.Context, postChan chan interface{}, seq int64) {
 				continue
 			}
 
-			scheduler := sequential.NewScheduler(conn.RemoteAddr().String(), eventProcessor(postChan, ctx).EventHandler)
+			scheduler := sequential.NewScheduler(conn.RemoteAddr().String(), eventProcessor(postChan, ctx, ticker).EventHandler)
 			err = events.HandleRepoStream(ctx, conn, scheduler)
 
 			// If error sleep
@@ -60,7 +60,7 @@ func Subscribe(ctx context.Context, postChan chan interface{}, seq int64) {
 	}
 }
 
-func eventProcessor(postChan chan interface{}, context context.Context) *events.RepoStreamCallbacks {
+func eventProcessor(postChan chan interface{}, context context.Context, ticker *time.Ticker) *events.RepoStreamCallbacks {
 	streamCallbacks := &events.RepoStreamCallbacks{
 		RepoCommit: func(evt *atproto.SyncSubscribeRepos_Commit) error {
 			rr, err := repo.ReadRepoFromCar(context, bytes.NewReader(evt.Blocks))
@@ -79,6 +79,7 @@ func eventProcessor(postChan chan interface{}, context context.Context) *events.
 
 				switch event_type {
 				case repomgr.EvtKindCreateRecord, repomgr.EvtKindUpdateRecord:
+					ticker.Reset(5 * time.Minute)
 					_, rec, err := rr.GetRecord(context, op.Path)
 					if err != nil {
 						continue
