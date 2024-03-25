@@ -199,8 +199,8 @@ const langToName = (lang: string): string => {
       return "Norwegian bokmål"
     case "nn":
       return "Norwegian nynorsk"
-    case "smi":
-      return "Sami"
+    case "se":
+      return "Northern Sami"
     default:
       return lang
   }
@@ -305,7 +305,7 @@ const App: Component = () => {
           <PostPerTime time={time} lang="" label="All languages" />
           <PostPerTime time={time} lang="nb" label="Norwegian bokmål" />
           <PostPerTime time={time} lang="nn" label="Norwegian nynorsk" />
-          <PostPerTime time={time} lang="smi" label="Sami" />
+          <PostPerTime time={time} lang="se" label="Northern Sami" />
           <PostFirehose />
         </div>
       </div>

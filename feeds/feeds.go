@@ -19,7 +19,7 @@ func nynorsk(reader *db.Reader, cursor string, limit int) (*models.FeedResponse,
 }
 
 func samisk(reader *db.Reader, cursor string, limit int) (*models.FeedResponse, error) {
-	return genericAlgo(reader, cursor, limit, "smi")
+	return genericAlgo(reader, cursor, limit, "se")
 }
 
 func all(reader *db.Reader, cursor string, limit int) (*models.FeedResponse, error) {

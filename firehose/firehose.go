@@ -101,8 +101,8 @@ func eventProcessor(postChan chan interface{}, context context.Context, ticker *
 						continue
 					}
 
-					// Contains any of the languages in the post that are one of the following: nb, nn, smi
-					if lo.Some(post.Langs, []string{"no", "nb", "nn", "smi"}) {
+					// Contains any of the languages in the post that are one of the following: nb, nn, se
+					if lo.Some(post.Langs, []string{"no", "nb", "nn", "se"}) {
 						// Keep track of what commits we have processed
 						postChan <- models.ProcessSeqEvent{
 							Seq: evt.Seq,
