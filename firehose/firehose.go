@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"norsky/models"
 	"strings"
 	"time"
@@ -25,12 +26,21 @@ import (
 // Subscribe to the firehose using the Firehose struct as a receiver
 func Subscribe(ctx context.Context, postChan chan interface{}, ticker *time.Ticker, seq int64) {
 	address := "wss://bsky.network/xrpc/com.atproto.sync.subscribeRepos"
+	headers := http.Header{}
+	headers.Set("User-Agent", "NorSky: https://github.com/snorremd/norsky")
+
 	if seq >= 0 {
 		log.Info("Starting from sequence: ", seq)
 		address = fmt.Sprintf("%s?cursor=%d", address, seq)
 	}
+	// Identify dialer with User-Agent header
+
 	dialer := websocket.DefaultDialer
 	backoff := backoff.NewExponentialBackOff()
+	backoff.InitialInterval = 3 * time.Second
+	backoff.MaxInterval = 30 * time.Second
+	backoff.Multiplier = 1.5
+	backoff.MaxElapsedTime = 120 * time.Second
 
 	// Check if context is cancelled, if so exit the connection loop
 	for {
