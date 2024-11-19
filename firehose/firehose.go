@@ -25,7 +25,7 @@ import (
 
 // Subscribe to the firehose using the Firehose struct as a receiver
 func Subscribe(ctx context.Context, postChan chan interface{}, ticker *time.Ticker, seq int64) {
-	address := "wss://bsky.network/xrpc/com.atproto.sync.subscribeRepos"
+	address := "wss://bsky.network/xrpc/com.atproto.sync.subscribeRepo"
 	headers := http.Header{}
 	headers.Set("User-Agent", "NorSky: https://github.com/snorremd/norsky")
 
@@ -37,9 +37,9 @@ func Subscribe(ctx context.Context, postChan chan interface{}, ticker *time.Tick
 
 	dialer := websocket.DefaultDialer
 	backoff := backoff.NewExponentialBackOff()
-	backoff.InitialInterval = 3 * time.Second
+	backoff.InitialInterval = 5 * time.Second
 	backoff.MaxInterval = 30 * time.Second
-	backoff.Multiplier = 1.5
+	backoff.Multiplier = 2
 	backoff.MaxElapsedTime = 120 * time.Second
 
 	// Check if context is cancelled, if so exit the connection loop
@@ -52,7 +52,16 @@ func Subscribe(ctx context.Context, postChan chan interface{}, ticker *time.Tick
 			conn, _, err := dialer.Dial(address, nil)
 			if err != nil {
 				log.Errorf("Error connecting to firehose: %s", err)
-				time.Sleep(backoff.NextBackOff())
+
+				// Get the next backoff duration
+				duration := backoff.NextBackOff()
+
+				if duration == backoff.Stop {
+					log.Warn("MaxElapsedTime reached. Stopping reconnect attempts.")
+					return // Exit the loop
+				}
+
+				time.Sleep(duration)
 				// Increase backoff by factor of 1.3, rounded to nearest whole number
 				continue
 			}
