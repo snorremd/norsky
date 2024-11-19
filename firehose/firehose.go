@@ -25,7 +25,7 @@ import (
 
 // Subscribe to the firehose using the Firehose struct as a receiver
 func Subscribe(ctx context.Context, postChan chan interface{}, ticker *time.Ticker, seq int64) {
-	address := "wss://bsky.network/xrpc/com.atproto.sync.subscribeRepo"
+	address := "wss://bsky.network/xrpc/com.atproto.sync.subscribeRepos"
 	headers := http.Header{}
 	headers.Set("User-Agent", "NorSky: https://github.com/snorremd/norsky")
 
