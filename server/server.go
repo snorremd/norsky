@@ -136,7 +136,7 @@ func Server(config *ServerConfig) *fiber.App {
 	// Setup CORS for localhost:3001
 	app.Use(func(c *fiber.Ctx) error {
 		corsConfig := cors.Config{
-			AllowOrigins:     "*",
+			AllowOrigins:     "https://norsky.snorre.io",
 			AllowHeaders:     "Cache-Control",
 			AllowCredentials: true,
 		}
