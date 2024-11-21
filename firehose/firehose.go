@@ -19,12 +19,23 @@ import (
 	"github.com/bluesky-social/indigo/repomgr"
 	"github.com/cenkalti/backoff/v4"
 	"github.com/gorilla/websocket"
+	lingua "github.com/pemistahl/lingua-go"
 	"github.com/samber/lo"
 	log "github.com/sirupsen/logrus"
 )
 
+// Static list of languages to use for lingua-go language detection
+
+var languages = []lingua.Language{
+	lingua.Bokmal,
+	lingua.Nynorsk,
+}
+
+var detector = lingua.NewLanguageDetectorBuilder().FromLanguages(languages...).Build()
+
 // Subscribe to the firehose using the Firehose struct as a receiver
 func Subscribe(ctx context.Context, postChan chan interface{}, ticker *time.Ticker, seq int64) {
+
 	address := "wss://bsky.network/xrpc/com.atproto.sync.subscribeRepos"
 	headers := http.Header{}
 	headers.Set("User-Agent", "NorSky: https://github.com/snorremd/norsky")
@@ -122,6 +133,17 @@ func eventProcessor(postChan chan interface{}, context context.Context, ticker *
 
 					// Contains any of the languages in the post that are one of the following: nb, nn, se
 					if lo.Some(post.Langs, []string{"no", "nb", "nn", "se"}) {
+
+						// If tagged as no, nb, nn we need to detect the language to weed out false positives
+						if lo.Some(post.Langs, []string{"no", "nb", "nn"}) {
+							// Detect language
+							_, exists := detector.DetectLanguageOf(post.Text)
+							if !exists {
+								log.Warn("Not norwegian, skipping")
+								continue
+							}
+						}
+
 						// Keep track of what commits we have processed
 						postChan <- models.ProcessSeqEvent{
 							Seq: evt.Seq,
