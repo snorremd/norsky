@@ -45,33 +45,45 @@ type ServerConfig struct {
 // Make it sync
 type Broadcaster struct {
 	sync.Mutex
-	clients map[string]chan models.CreatePostEvent
+	createPostClients map[string]chan models.CreatePostEvent
+	statisticsClients map[string]chan models.StatisticsEvent
 }
 
 // Constructor
 func NewBroadcaster() *Broadcaster {
 	return &Broadcaster{
-		clients: make(map[string]chan models.CreatePostEvent),
+		createPostClients: make(map[string]chan models.CreatePostEvent),
+		statisticsClients: make(map[string]chan models.StatisticsEvent),
 	}
 }
 
-func (b *Broadcaster) Broadcast(post models.CreatePostEvent) {
+func (b *Broadcaster) BroadcastCreatePost(post models.CreatePostEvent) {
 	log.WithFields(log.Fields{
-		"clients": len(b.clients),
+		"clients": len(b.createPostClients),
 	}).Info("Broadcasting post to SSE clients")
-	for _, client := range b.clients {
+	for _, client := range b.createPostClients {
 		client <- post
 	}
 }
 
+func (b *Broadcaster) BroadcastStatistics(stats models.StatisticsEvent) {
+	log.WithFields(log.Fields{
+		"clients": len(b.statisticsClients),
+	}).Info("Broadcasting statistics to SSE clients")
+	for _, client := range b.statisticsClients {
+		client <- stats
+	}
+}
+
 // Function to add a client to the broadcaster
-func (b *Broadcaster) AddClient(key string, client chan models.CreatePostEvent) {
+func (b *Broadcaster) AddClient(key string, createPostClient chan models.CreatePostEvent, statisticsClient chan models.StatisticsEvent) {
 	b.Lock()
 	defer b.Unlock()
-	b.clients[key] = client
+	b.createPostClients[key] = createPostClient
+	b.statisticsClients[key] = statisticsClient
 	log.WithFields(log.Fields{
 		"key":   key,
-		"count": len(b.clients),
+		"count": len(b.createPostClients),
 	}).Info("Adding client to broadcaster")
 }
 
@@ -80,17 +92,25 @@ func (b *Broadcaster) RemoveClient(key string) {
 	b.Lock()
 	defer b.Unlock()
 	// Check if client channel exists in map
-	if _, ok := b.clients[key]; !ok {
+	if _, ok := b.createPostClients[key]; !ok {
 		// Close the channel unless it's already closed
-		if b.clients[key] != nil {
-			close(b.clients[key])
+		if b.createPostClients[key] != nil {
+			close(b.createPostClients[key])
 		}
-		delete(b.clients, key)
+		delete(b.createPostClients, key)
+	}
+
+	if _, ok := b.statisticsClients[key]; !ok {
+		// Close the channel unless it's already closed
+		if b.statisticsClients[key] != nil {
+			close(b.statisticsClients[key])
+		}
+		delete(b.statisticsClients, key)
 	}
 
 	log.WithFields(log.Fields{
 		"key":   key,
-		"count": len(b.clients),
+		"count": len(b.createPostClients),
 	}).Info("Removed client from broadcaster")
 }
 
@@ -98,7 +118,7 @@ func (b *Broadcaster) Shutdown() {
 	log.Info("Shutting down broadcaster")
 	b.Lock()
 	defer b.Unlock()
-	for _, client := range b.clients {
+	for _, client := range b.createPostClients {
 		close(client)
 	}
 }
@@ -136,7 +156,7 @@ func Server(config *ServerConfig) *fiber.App {
 	// Setup CORS for localhost:3001
 	app.Use(func(c *fiber.Ctx) error {
 		corsConfig := cors.Config{
-			AllowOrigins:     "https://norsky.snorre.io",
+			AllowOrigins:     "http://localhost:3001",
 			AllowHeaders:     "Cache-Control",
 			AllowCredentials: true,
 		}
@@ -295,9 +315,10 @@ func Server(config *ServerConfig) *fiber.App {
 		c.Context().SetBodyStreamWriter(fasthttp.StreamWriter(func(w *bufio.Writer) {
 			// Register the channel to write posts to so server can write to it
 			key := uuid.New().String()
-			sseChannel := make(chan models.CreatePostEvent)
+			sseCreatePostChannel := make(chan models.CreatePostEvent)
+			sseStatisticsChannel := make(chan models.StatisticsEvent)
 			aliveChan := time.NewTicker(5 * time.Second)
-			bc.AddClient(key, sseChannel)
+			bc.AddClient(key, sseCreatePostChannel, sseStatisticsChannel)
 
 			// A function to cleanup
 			cleanup := func() {
@@ -308,7 +329,7 @@ func Server(config *ServerConfig) *fiber.App {
 			}
 
 			// Send the SSE key first so the client can close the connection when it wants to
-			fmt.Fprintf(w, "data: %s\n\n", key)
+			fmt.Fprintf(w, "event: init\ndata: %s\n\n", key)
 			w.Flush()
 
 			for {
@@ -319,7 +340,8 @@ func Server(config *ServerConfig) *fiber.App {
 						cleanup()
 						return
 					}
-				case post := <-sseChannel:
+				case post := <-sseCreatePostChannel:
+
 					jsonPost, jsonErr := json.Marshal(post.Post)
 
 					if jsonErr != nil {
@@ -327,7 +349,22 @@ func Server(config *ServerConfig) *fiber.App {
 						break // Break out of the select statement as we have no post to write
 					}
 
-					fmt.Fprintf(w, "data: %s\n\n", jsonPost)
+					fmt.Fprintf(w, "event: create-post\ndata: %s\n\n", jsonPost)
+					err := w.Flush()
+					if err != nil {
+						cleanup()
+						return
+					}
+
+				case stats := <-sseStatisticsChannel:
+					jsonStats, jsonErr := json.Marshal(stats)
+
+					if jsonErr != nil {
+						log.Error("Error marshalling stats", jsonErr)
+						break // Break out of the select statement as we have no stats to write
+					}
+
+					fmt.Fprintf(w, "event: statistics\ndata: %s\n\n", jsonStats)
 					err := w.Flush()
 					if err != nil {
 						cleanup()

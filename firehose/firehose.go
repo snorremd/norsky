@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"norsky/models"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/bluesky-social/indigo/api/atproto"
@@ -33,8 +34,15 @@ var languages = []lingua.Language{
 
 var detector = lingua.NewLanguageDetectorBuilder().FromLanguages(languages...).Build()
 
+// Keep track of processed event and posts count to show stats in the web interface
+
+var (
+	processedEvents int64
+	processedPosts  int64
+)
+
 // Subscribe to the firehose using the Firehose struct as a receiver
-func Subscribe(ctx context.Context, postChan chan interface{}, ticker *time.Ticker, seq int64) {
+func Subscribe(ctx context.Context, postChan chan interface{}, statisticsChan chan models.StatisticsEvent, ticker *time.Ticker, seq int64) {
 
 	address := "wss://bsky.network/xrpc/com.atproto.sync.subscribeRepos"
 	headers := http.Header{}
@@ -52,6 +60,32 @@ func Subscribe(ctx context.Context, postChan chan interface{}, ticker *time.Tick
 	backoff.MaxInterval = 30 * time.Second
 	backoff.Multiplier = 2
 	backoff.MaxElapsedTime = 120 * time.Second
+
+	// Setup a ticker chan to send statistics events
+	// Make a new ticker running every 5 seconds
+	statisticsTicker := time.NewTicker(1 * time.Second)
+
+	go func() {
+		defer func() {
+			fmt.Println("Ticker stopped")
+			statisticsTicker.Stop()
+		}()
+		for {
+			select {
+			case <-statisticsTicker.C:
+				// Send statistics event
+				statisticsChan <- models.StatisticsEvent{
+					EventsPerSecond: atomic.LoadInt64(&processedEvents),
+					PostsPerSecond:  atomic.LoadInt64(&processedPosts),
+				}
+				// Reset processed events and posts
+				atomic.StoreInt64(&processedEvents, 0)
+				atomic.StoreInt64(&processedPosts, 0)
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
 
 	// Check if context is cancelled, if so exit the connection loop
 	for {
@@ -93,6 +127,9 @@ func Subscribe(ctx context.Context, postChan chan interface{}, ticker *time.Tick
 func eventProcessor(postChan chan interface{}, context context.Context, ticker *time.Ticker) *events.RepoStreamCallbacks {
 	streamCallbacks := &events.RepoStreamCallbacks{
 		RepoCommit: func(evt *atproto.SyncSubscribeRepos_Commit) error {
+			// Keep track of processed events
+			atomic.AddInt64(&processedEvents, 1)
+
 			rr, err := repo.ReadRepoFromCar(context, bytes.NewReader(evt.Blocks))
 			if err != nil {
 				log.Errorf("Error reading repo from car: %s", err)
@@ -109,6 +146,9 @@ func eventProcessor(postChan chan interface{}, context context.Context, ticker *
 
 				switch event_type {
 				case repomgr.EvtKindCreateRecord, repomgr.EvtKindUpdateRecord:
+					// Keep track of processed posts
+					atomic.AddInt64(&processedPosts, 1)
+
 					ticker.Reset(5 * time.Minute)
 					_, rec, err := rr.GetRecord(context, op.Path)
 					if err != nil {
@@ -142,25 +182,24 @@ func eventProcessor(postChan chan interface{}, context context.Context, ticker *
 								log.Warn("Not norwegian, skipping")
 								continue
 							}
-						}
 
-						// Keep track of what commits we have processed
-						postChan <- models.ProcessSeqEvent{
-							Seq: evt.Seq,
-						}
-						createdAt, err := time.Parse(time.RFC3339, post.CreatedAt)
-						if err == nil {
-							postChan <- models.CreatePostEvent{
-								Post: models.Post{
-									Uri:       uri,
-									CreatedAt: createdAt.Unix(),
-									Text:      post.Text,
-									Languages: post.Langs,
-								},
+							// Keep track of what commits we have processed
+							postChan <- models.ProcessSeqEvent{
+								Seq: evt.Seq,
+							}
+							createdAt, err := time.Parse(time.RFC3339, post.CreatedAt)
+							if err == nil {
+								postChan <- models.CreatePostEvent{
+									Post: models.Post{
+										Uri:       uri,
+										CreatedAt: createdAt.Unix(),
+										Text:      post.Text,
+										Languages: post.Langs,
+									},
+								}
 							}
 						}
 					}
-
 				}
 			}
 

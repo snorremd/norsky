@@ -83,6 +83,7 @@ func serveCmd() *cli.Command {
 			firehoseCtx := context.Context(ctx.Context)
 			livenessTicker := time.NewTicker(5 * time.Minute)
 			postChan := make(chan interface{})
+			statisticsChan := make(chan models.StatisticsEvent)
 			dbPostChan := make(chan interface{})   // Channel for writing posts to the database
 			broadcaster := server.NewBroadcaster() // SSE broadcaster
 
@@ -110,16 +111,23 @@ func serveCmd() *cli.Command {
 					case models.CreatePostEvent:
 						dbPostChan <- post
 						// Broadcast without blocking
-						go broadcaster.Broadcast(post) // Broadcast new post to SSE clients
+						go broadcaster.BroadcastCreatePost(post) // Broadcast new post to SSE clients
 					default:
 						dbPostChan <- post
 					}
 				}
 			}()
 
+			// Glue code to pass statistics events to the broadcaster
+			go func() {
+				for stats := range statisticsChan {
+					broadcaster.BroadcastStatistics(stats)
+				}
+			}()
+
 			go func() {
 				fmt.Println("Subscribing to firehose...")
-				firehose.Subscribe(firehoseCtx, postChan, livenessTicker, seq)
+				firehose.Subscribe(firehoseCtx, postChan, statisticsChan, livenessTicker, seq)
 			}()
 
 			// Add liveness probe to the server, to check if we are still receiving posts on the web socket
@@ -131,7 +139,7 @@ func serveCmd() *cli.Command {
 					log.Errorf("Firehose liveness probe failed, restarting connection")
 					firehoseCtx.Done()
 					firehoseCtx = context.Context(ctx.Context)
-					firehose.Subscribe(firehoseCtx, postChan, livenessTicker, seq)
+					firehose.Subscribe(firehoseCtx, postChan, statisticsChan, livenessTicker, seq)
 				}
 			}()
 
