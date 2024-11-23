@@ -265,19 +265,16 @@ interface PostFirehoseProps {
 
 const PostFirehose: Component<PostFirehoseProps> = ({ post, className }) => {
 
-  // Display a pretty list of the posts
-  // Set a max height and use overflow-y: scroll to make it scrollable
-  // Height should be whatever the parent is.
-
-  const createdAt = post() ? formatRelative(new Date(post().createdAt * 1000), new Date()) : "";
   // Match regex to get the profile and post id
   // URI example: at://did:plc:opkjeuzx2lego6a7gueytryu/app.bsky.feed.post/3kcbxsslpu623
   // profile = did:plc:opkjeuzx2lego6a7gueytryu
   // post = 3kcbxsslpu623
 
-  const regex = /at:\/\/(did:plc:[a-z0-9]+)\/app.bsky.feed.post\/([a-z0-9]+)/;
-  const [profile, postId] = post() ? regex.exec(post().uri)!.slice(1) : ["", ""];
-  const bskyLink = `https://bsky.app/profile/${profile}/post/${postId}`;
+  const bskyLink = (post: Post) => {
+    const regex = /at:\/\/(did:plc:[a-z0-9]+)\/app.bsky.feed.post\/([a-z0-9]+)/;
+    const [profile, postId] = regex.exec(post.uri)!.slice(1);
+    return `https://bsky.app/profile/${profile}/post/${postId}`;
+  } 
 
   return (
     <StatWrapper className={`row-span-2 ${className}`}>
@@ -286,7 +283,7 @@ const PostFirehose: Component<PostFirehoseProps> = ({ post, className }) => {
         {post() ? (
         <div class="flex flex-col gap-4 p-4 bg-zinc-900 rounded-md">
           <div class="flex flex-row justify-between">
-            <p class="text-zinc-400">{createdAt}</p>
+            <p class="text-zinc-400">{formatRelative(new Date(post().createdAt * 1000), new Date()) }</p>
             <p class="text-zinc-400">
               {post().languages.map(langToName).join(", ")}
             </p>
@@ -297,7 +294,7 @@ const PostFirehose: Component<PostFirehoseProps> = ({ post, className }) => {
           <div class="flex flex-row justify-end">
             <a
               class="text-sky-300 hover:text-sky-200 underline"
-              href={bskyLink}
+              href={bskyLink(post())}
               target="_blank"
             >
               View on Bsky
