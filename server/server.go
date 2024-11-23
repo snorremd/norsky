@@ -44,7 +44,7 @@ type ServerConfig struct {
 
 // Make it sync
 type Broadcaster struct {
-	sync.Mutex
+	sync.RWMutex
 	createPostClients map[string]chan models.CreatePostEvent
 	statisticsClients map[string]chan models.StatisticsEvent
 }
@@ -52,26 +52,31 @@ type Broadcaster struct {
 // Constructor
 func NewBroadcaster() *Broadcaster {
 	return &Broadcaster{
-		createPostClients: make(map[string]chan models.CreatePostEvent),
-		statisticsClients: make(map[string]chan models.StatisticsEvent),
+		createPostClients: make(map[string]chan models.CreatePostEvent, 10000),
+		statisticsClients: make(map[string]chan models.StatisticsEvent, 10000),
 	}
 }
 
 func (b *Broadcaster) BroadcastCreatePost(post models.CreatePostEvent) {
-	log.WithFields(log.Fields{
-		"clients": len(b.createPostClients),
-	}).Info("Broadcasting post to SSE clients")
-	for _, client := range b.createPostClients {
-		client <- post
+	for id, client := range b.createPostClients {
+		select {
+		case client <- post: // Non-blocking send
+		default:
+			log.Warnf("Client channel full, skipping stats for client: %v", id)
+		}
 	}
 }
 
 func (b *Broadcaster) BroadcastStatistics(stats models.StatisticsEvent) {
-	log.WithFields(log.Fields{
-		"clients": len(b.statisticsClients),
-	}).Info("Broadcasting statistics to SSE clients")
-	for _, client := range b.statisticsClients {
-		client <- stats
+	b.RLock() // Assuming you have a mutex for client safety
+	defer b.RUnlock()
+
+	for id, client := range b.statisticsClients {
+		select {
+		case client <- stats: // Non-blocking send
+		default:
+			log.Warnf("Client channel full, skipping stats for client: %v", id)
+		}
 	}
 }
 
@@ -91,21 +96,17 @@ func (b *Broadcaster) AddClient(key string, createPostClient chan models.CreateP
 func (b *Broadcaster) RemoveClient(key string) {
 	b.Lock()
 	defer b.Unlock()
-	// Check if client channel exists in map
-	if _, ok := b.createPostClients[key]; !ok {
-		// Close the channel unless it's already closed
-		if b.createPostClients[key] != nil {
-			close(b.createPostClients[key])
-		}
-		delete(b.createPostClients, key)
+
+	// Remove from createPostClients
+	if client, ok := b.createPostClients[key]; ok { // Check if the client exists
+		close(client)                    // Safely close the channel
+		delete(b.createPostClients, key) // Remove from the map
 	}
 
-	if _, ok := b.statisticsClients[key]; !ok {
-		// Close the channel unless it's already closed
-		if b.statisticsClients[key] != nil {
-			close(b.statisticsClients[key])
-		}
-		delete(b.statisticsClients, key)
+	// Remove from statisticsClients
+	if client, ok := b.statisticsClients[key]; ok { // Check if the client exists
+		close(client)                    // Safely close the channel
+		delete(b.statisticsClients, key) // Remove from the map
 	}
 
 	log.WithFields(log.Fields{
@@ -312,67 +313,87 @@ func Server(config *ServerConfig) *fiber.App {
 		c.Set("Connection", "keep-alive")
 		c.Set("Transfer-Encoding", "chunked")
 
-		c.Context().SetBodyStreamWriter(fasthttp.StreamWriter(func(w *bufio.Writer) {
-			// Register the channel to write posts to so server can write to it
-			key := uuid.New().String()
-			sseCreatePostChannel := make(chan models.CreatePostEvent)
-			sseStatisticsChannel := make(chan models.StatisticsEvent)
-			aliveChan := time.NewTicker(5 * time.Second)
-			bc.AddClient(key, sseCreatePostChannel, sseStatisticsChannel)
+		// Unique client key
+		key := uuid.New().String()
+		sseCreatePostChannel := make(chan models.CreatePostEvent, 10) // Buffered channel
+		sseStatisticsChannel := make(chan models.StatisticsEvent, 10)
+		aliveChan := time.NewTicker(5 * time.Second)
 
-			// A function to cleanup
-			cleanup := func() {
-				log.Info("Cleaning up SSE stream ", key)
-				// Remove sseChannel from the list of channels
-				bc.RemoveClient(key)
-				aliveChan.Stop()
+		defer aliveChan.Stop()
+
+		// Register the client
+		bc.AddClient(key, sseCreatePostChannel, sseStatisticsChannel)
+
+		// Cleanup function
+		cleanup := func() {
+			log.Infof("Cleaning up SSE stream for client: %s", key)
+			bc.RemoveClient(key)
+		}
+
+		// Use StreamWriter to manage SSE streaming
+		c.Context().SetBodyStreamWriter(fasthttp.StreamWriter(func(w *bufio.Writer) {
+			defer cleanup()
+
+			// Send initial event with client key
+			fmt.Fprintf(w, "event: init\ndata: %s\n\n", key)
+			if err := w.Flush(); err != nil {
+				log.Errorf("Failed to send init event: %v", err)
+				return
 			}
 
-			// Send the SSE key first so the client can close the connection when it wants to
-			fmt.Fprintf(w, "event: init\ndata: %s\n\n", key)
-			w.Flush()
-
+			// Start streaming loop
 			for {
 				select {
 				case <-aliveChan.C:
-					err := w.Flush()
-					if err != nil {
-						cleanup()
+					// Send keep-alive pings
+					if _, err := fmt.Fprintf(w, "event: ping\ndata: \n\n"); err != nil {
+						log.Warnf("Failed to send ping to client %s: %v", key, err)
 						return
 					}
-				case post := <-sseCreatePostChannel:
-
-					jsonPost, jsonErr := json.Marshal(post.Post)
-
-					if jsonErr != nil {
-						log.Error("Error marshalling post", jsonErr)
-						break // Break out of the select statement as we have no post to write
-					}
-
-					fmt.Fprintf(w, "event: create-post\ndata: %s\n\n", jsonPost)
-					err := w.Flush()
-					if err != nil {
-						cleanup()
+					if err := w.Flush(); err != nil {
+						log.Warnf("Failed to flush ping for client %s: %v", key, err)
 						return
 					}
 
-				case stats := <-sseStatisticsChannel:
-					jsonStats, jsonErr := json.Marshal(stats)
-
-					if jsonErr != nil {
-						log.Error("Error marshalling stats", jsonErr)
-						break // Break out of the select statement as we have no stats to write
+				case post, ok := <-sseCreatePostChannel:
+					if !ok {
+						log.Warnf("CreatePostChannel closed for client %s", key)
+						return
+					}
+					jsonPost, err := json.Marshal(post.Post)
+					if err != nil {
+						log.Errorf("Error marshalling post for client %s: %v", key, err)
+						continue
+					}
+					if _, err := fmt.Fprintf(w, "event: create-post\ndata: %s\n\n", jsonPost); err != nil {
+						log.Warnf("Failed to send create-post event to client %s: %v", key, err)
+						return
+					}
+					if err := w.Flush(); err != nil {
+						log.Warnf("Failed to flush create-post event for client %s: %v", key, err)
+						return
 					}
 
-					fmt.Fprintf(w, "event: statistics\ndata: %s\n\n", jsonStats)
-					err := w.Flush()
+				case stats, ok := <-sseStatisticsChannel:
+					if !ok {
+						log.Warnf("StatisticsChannel closed for client %s", key)
+						return
+					}
+					jsonStats, err := json.Marshal(stats)
 					if err != nil {
-						cleanup()
+						log.Errorf("Error marshalling stats for client %s: %v", key, err)
+						continue
+					}
+					if _, err := fmt.Fprintf(w, "event: statistics\ndata: %s\n\n", jsonStats); err != nil {
+						log.Warnf("Failed to send statistics event to client %s: %v", key, err)
+						return
+					}
+					if err := w.Flush(); err != nil {
+						log.Warnf("Failed to flush statistics event for client %s: %v", key, err)
 						return
 					}
 				}
 			}
-
 		}))
 
 		return nil

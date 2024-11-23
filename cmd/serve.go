@@ -83,7 +83,7 @@ func serveCmd() *cli.Command {
 			firehoseCtx := context.Context(ctx.Context)
 			livenessTicker := time.NewTicker(5 * time.Minute)
 			postChan := make(chan interface{})
-			statisticsChan := make(chan models.StatisticsEvent)
+			statisticsChan := make(chan models.StatisticsEvent, 1000)
 			dbPostChan := make(chan interface{})   // Channel for writing posts to the database
 			broadcaster := server.NewBroadcaster() // SSE broadcaster
 
@@ -105,6 +105,11 @@ func serveCmd() *cli.Command {
 			// Ideally one might want to do this in a more elegant way
 			// TODO: Move broadcaster into server package, i.e. make server a receiver and handle broadcaster and fiber together
 			go func() {
+				defer func() {
+					if r := recover(); r != nil {
+						log.Errorf("Recovered from panic in post broadcast routine: %v", r)
+					}
+				}()
 				for post := range postChan {
 					switch post := post.(type) {
 					// Don't crash if broadcast fails
@@ -120,30 +125,66 @@ func serveCmd() *cli.Command {
 
 			// Glue code to pass statistics events to the broadcaster
 			go func() {
+				defer func() {
+					if r := recover(); r != nil {
+						log.Errorf("Recovered from panic in statistics broadcast routine: %v", r)
+					}
+				}()
+
 				for stats := range statisticsChan {
 					broadcaster.BroadcastStatistics(stats)
 				}
 			}()
 
 			go func() {
+				defer func() {
+					if r := recover(); r != nil {
+						log.Errorf("Recovered from panic in firehose subscribe routine: %v", r)
+					}
+				}()
 				fmt.Println("Subscribing to firehose...")
-				firehose.Subscribe(firehoseCtx, postChan, statisticsChan, livenessTicker, seq)
+				firehose.Subscribe(firehoseCtx, postChan, livenessTicker, seq)
+			}()
+
+			go func() {
+				defer func() {
+					if r := recover(); r != nil {
+						log.Errorf("Recovered from panic in monitor firehose routine: %v", r)
+					}
+				}()
+				fmt.Println("Starting statistics monitor...")
+				firehose.MonitorFirehoseStats(ctx.Context, statisticsChan)
+			}()
+
+			go func() {
+				<-ctx.Done()
+				log.Info("Context canceled with reason:", ctx.Err())
 			}()
 
 			// Add liveness probe to the server, to check if we are still receiving posts on the web socket
 			// If not we need to restart the firehose connection
 
 			go func() {
+				defer func() {
+					if r := recover(); r != nil {
+						log.Errorf("Recovered from panic in firehose liveness ticker: %v", r)
+					}
+				}()
 				for range livenessTicker.C {
 					// If we get here the firehose stopped sending posts so we need to restart the connection
 					log.Errorf("Firehose liveness probe failed, restarting connection")
 					firehoseCtx.Done()
 					firehoseCtx = context.Context(ctx.Context)
-					firehose.Subscribe(firehoseCtx, postChan, statisticsChan, livenessTicker, seq)
+					firehose.Subscribe(firehoseCtx, postChan, livenessTicker, seq)
 				}
 			}()
 
 			go func() {
+				defer func() {
+					if r := recover(); r != nil {
+						log.Errorf("Recovered from panic: %v", r)
+					}
+				}()
 				fmt.Println("Starting server...")
 
 				if err := app.Listen(fmt.Sprintf("%s:%d", host, port)); err != nil {
@@ -152,6 +193,11 @@ func serveCmd() *cli.Command {
 			}()
 
 			go func() {
+				defer func() {
+					if r := recover(); r != nil {
+						log.Errorf("Recovered from panic: %v", r)
+					}
+				}()
 				fmt.Println("Starting database writer...")
 				db.Subscribe(ctx.Context, database, dbPostChan)
 			}()

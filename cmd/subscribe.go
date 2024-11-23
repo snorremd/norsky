@@ -43,7 +43,7 @@ Prints all other log messages to stderr.`,
 
 			go func() {
 				fmt.Println("Subscribing to firehose...")
-				firehose.Subscribe(ctx.Context, postChan, nil, ticker, -1)
+				firehose.Subscribe(ctx.Context, postChan, ticker, -1)
 			}()
 
 			go func() {

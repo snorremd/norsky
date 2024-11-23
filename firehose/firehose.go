@@ -42,7 +42,7 @@ var (
 )
 
 // Subscribe to the firehose using the Firehose struct as a receiver
-func Subscribe(ctx context.Context, postChan chan interface{}, statisticsChan chan models.StatisticsEvent, ticker *time.Ticker, seq int64) {
+func Subscribe(ctx context.Context, postChan chan interface{}, ticker *time.Ticker, seq int64) {
 
 	address := "wss://bsky.network/xrpc/com.atproto.sync.subscribeRepos"
 	headers := http.Header{}
@@ -60,32 +60,6 @@ func Subscribe(ctx context.Context, postChan chan interface{}, statisticsChan ch
 	backoff.MaxInterval = 30 * time.Second
 	backoff.Multiplier = 2
 	backoff.MaxElapsedTime = 120 * time.Second
-
-	// Setup a ticker chan to send statistics events
-	// Make a new ticker running every 5 seconds
-	statisticsTicker := time.NewTicker(1 * time.Second)
-
-	go func() {
-		defer func() {
-			fmt.Println("Ticker stopped")
-			statisticsTicker.Stop()
-		}()
-		for {
-			select {
-			case <-statisticsTicker.C:
-				// Send statistics event
-				statisticsChan <- models.StatisticsEvent{
-					EventsPerSecond: atomic.LoadInt64(&processedEvents),
-					PostsPerSecond:  atomic.LoadInt64(&processedPosts),
-				}
-				// Reset processed events and posts
-				atomic.StoreInt64(&processedEvents, 0)
-				atomic.StoreInt64(&processedPosts, 0)
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
 
 	// Check if context is cancelled, if so exit the connection loop
 	for {
@@ -120,6 +94,27 @@ func Subscribe(ctx context.Context, postChan chan interface{}, statisticsChan ch
 				time.Sleep(backoff.NextBackOff())
 				continue
 			}
+		}
+	}
+}
+
+func MonitorFirehoseStats(ctx context.Context, statisticsChan chan models.StatisticsEvent) {
+	ticker := time.NewTicker(5 * time.Second)
+	for {
+		select {
+		case <-ticker.C:
+			// Send statistics event
+			statisticsChan <- models.StatisticsEvent{
+				// Divide by 5 and round to get average per second
+				EventsPerSecond: atomic.LoadInt64(&processedEvents) / 5,
+				PostsPerSecond:  atomic.LoadInt64(&processedPosts) / 5,
+			}
+			// Reset processed events and posts
+			atomic.StoreInt64(&processedEvents, 0)
+			atomic.StoreInt64(&processedPosts, 0)
+		case <-ctx.Done():
+			log.Info("Stopping statistics ticker")
+			return
 		}
 	}
 }
