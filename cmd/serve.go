@@ -11,6 +11,7 @@ import (
 	"norsky/firehose"
 	"norsky/models"
 	"norsky/server"
+	"sync/atomic"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -81,8 +82,8 @@ func serveCmd() *cli.Command {
 			// Channel for subscribing to bluesky posts
 			// Create new child context for the firehose connection
 			firehoseCtx := context.Context(ctx.Context)
-			livenessTicker := time.NewTicker(5 * time.Minute)
-			postChan := make(chan interface{})
+			livenessTicker := time.NewTicker(15 * time.Minute)
+			postChan := make(chan interface{}, 1000)
 			statisticsChan := make(chan models.StatisticsEvent, 1000)
 			dbPostChan := make(chan interface{})   // Channel for writing posts to the database
 			broadcaster := server.NewBroadcaster() // SSE broadcaster
@@ -170,12 +171,30 @@ func serveCmd() *cli.Command {
 						log.Errorf("Recovered from panic in firehose liveness ticker: %v", r)
 					}
 				}()
+
+				var lastActivity atomic.Int64
+
 				for range livenessTicker.C {
-					// If we get here the firehose stopped sending posts so we need to restart the connection
-					log.Errorf("Firehose liveness probe failed, restarting connection")
-					firehoseCtx.Done()
-					firehoseCtx = context.Context(ctx.Context)
-					firehose.Subscribe(firehoseCtx, postChan, livenessTicker, seq)
+					select {
+					case <-ctx.Done():
+						return
+					default:
+						if time.Since(time.Unix(lastActivity.Load(), 0)) > 15*time.Minute {
+							log.Warn("Firehose inactive for 15 minutes, restarting connection")
+
+							// Cancel existing context
+							if cancel, ok := firehoseCtx.Value("cancel").(context.CancelFunc); ok {
+								cancel()
+							}
+
+							// Create new context with cancel
+							firehoseCtx, cancel := context.WithCancel(ctx.Context)
+							firehoseCtx = context.WithValue(firehoseCtx, "cancel", cancel)
+
+							// Restart subscription in new goroutine
+							go firehose.Subscribe(firehoseCtx, postChan, livenessTicker, seq)
+						}
+					}
 				}
 			}()
 

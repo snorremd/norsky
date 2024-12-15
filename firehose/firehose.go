@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"norsky/models"
 	"strings"
@@ -55,11 +56,12 @@ func Subscribe(ctx context.Context, postChan chan interface{}, ticker *time.Tick
 	// Identify dialer with User-Agent header
 
 	dialer := websocket.DefaultDialer
+	dialer.HandshakeTimeout = 30 * time.Second
 	backoff := backoff.NewExponentialBackOff()
-	backoff.InitialInterval = 5 * time.Second
-	backoff.MaxInterval = 30 * time.Second
-	backoff.Multiplier = 2
-	backoff.MaxElapsedTime = 120 * time.Second
+	backoff.InitialInterval = 1 * time.Second
+	backoff.MaxInterval = 600 * time.Second
+	backoff.Multiplier = 1.5
+	backoff.MaxElapsedTime = 0
 
 	// Check if context is cancelled, if so exit the connection loop
 	for {
@@ -68,30 +70,73 @@ func Subscribe(ctx context.Context, postChan chan interface{}, ticker *time.Tick
 			log.Info("Stopping firehose connect loop")
 			return
 		default:
-			conn, _, err := dialer.Dial(address, nil)
+			conn, _, err := dialer.Dial(address, headers)
 			if err != nil {
 				log.Errorf("Error connecting to firehose: %s", err)
-
-				// Get the next backoff duration
-				duration := backoff.NextBackOff()
-
-				if duration == backoff.Stop {
-					log.Warn("MaxElapsedTime reached. Stopping reconnect attempts.")
-					return // Exit the loop
-				}
-
-				time.Sleep(duration)
-				// Increase backoff by factor of 1.3, rounded to nearest whole number
+				time.Sleep(backoff.NextBackOff())
 				continue
 			}
+
+			// Reset backoff on successful connection
+			backoff.Reset()
+
+			// Set initial deadlines
+			conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+			conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+
+			// Start ping ticker
+			pingTicker := time.NewTicker(60 * time.Second)
+			defer pingTicker.Stop()
+
+			// Start ping goroutine
+			go func() {
+				for {
+					select {
+					case <-ctx.Done():
+						return
+					case <-pingTicker.C:
+						log.Debug("Sending ping to check connection")
+						if err := conn.WriteControl(websocket.PingMessage, []byte{}, time.Now().Add(10*time.Second)); err != nil {
+							log.Warn("Ping failed, closing connection for restart: ", err)
+							conn.Close()
+							return
+						}
+						// Reset read deadline after successful ping
+						if err := conn.SetReadDeadline(time.Now().Add(60 * time.Second)); err != nil {
+							log.Warn("Failed to set read deadline, closing connection: ", err)
+							conn.Close()
+							return
+						}
+					}
+				}
+			}()
+
+			// Remove pong handler since server doesn't respond
+			// Keep ping handler for completeness
+			conn.SetPingHandler(func(appData string) error {
+				log.Debug("Received ping from server")
+				return conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+			})
 
 			scheduler := sequential.NewScheduler(conn.RemoteAddr().String(), eventProcessor(postChan, ctx, ticker).EventHandler)
 			err = events.HandleRepoStream(ctx, conn, scheduler)
 
 			// If error sleep
 			if err != nil {
-				log.Errorf("Error handling repo stream: %s", err)
-				time.Sleep(backoff.NextBackOff())
+				if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
+					log.Info("Websocket closed normally")
+				} else if err == io.EOF {
+					log.Warn("Connection closed by server")
+				} else {
+					log.Errorf("Error handling repo stream: %s", err)
+				}
+				conn.Close()
+				// Use shorter backoff for normal closures
+				if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
+					time.Sleep(time.Second)
+				} else {
+					time.Sleep(backoff.NextBackOff())
+				}
 				continue
 			}
 		}

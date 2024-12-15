@@ -355,25 +355,42 @@ const App: Component = () => {
 
   onMount(() => {
     console.log("Mounting event source");
-    const es = new EventSource(`${host}/dashboard/feed/sse`);
-    setEventSource(es);
+    const setupEventSource = () => {
+      const es = new EventSource(`${host}/dashboard/feed/sse`);
+      setEventSource(es);
 
-    es.addEventListener("init", (e: MessageEvent) => {
-      console.log("Setting key", e.data);
-      setKey(e.data);
-    });
+      es.addEventListener("init", (e: MessageEvent) => {
+        console.log("Setting key", e.data);
+        setKey(e.data);
+      });
 
-    es.addEventListener("create-post", (e: MessageEvent) => {
-      const data = JSON.parse(e.data);
-      console.log("Received post", data);
-      setPost(data);
-    });
+      es.addEventListener("create-post", (e: MessageEvent) => {
+        const data = JSON.parse(e.data);
+        console.log("Received post", data);
+        setPost(data);
+      });
 
-    es.addEventListener("statistics", (e: MessageEvent) => {
-      const data = JSON.parse(e.data);
-      console.log("Received statistics", data);
-      setEventsPerSecond(data.eventsPerSecond);
-      setPostsPerSecond(data.postsPerSecond);
+      es.addEventListener("statistics", (e: MessageEvent) => {
+        const data = JSON.parse(e.data);
+        console.log("Received statistics", data);
+        setEventsPerSecond(data.eventsPerSecond);
+        setPostsPerSecond(data.postsPerSecond);
+      });
+
+      // Add error handling
+      es.addEventListener("error", (e) => {
+        console.error("EventSource error:", e);
+        es.close();
+        // Attempt to reconnect after a delay
+        setTimeout(setupEventSource, 5000);
+      });
+    };
+
+    setupEventSource();
+
+    // Cleanup on component unmount
+    onCleanup(() => {
+      close();
     });
   });
 
