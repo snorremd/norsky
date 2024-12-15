@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"norsky/models"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -24,6 +25,14 @@ import (
 	lingua "github.com/pemistahl/lingua-go"
 	"github.com/samber/lo"
 	log "github.com/sirupsen/logrus"
+)
+
+// Some constants to optimize the firehose
+
+const (
+	wsReadBufferSize  = 1024 * 16 // 16KB
+	wsWriteBufferSize = 1024 * 16 // 16KB
+	eventBufferSize   = 10000     // Increase from 1000
 )
 
 // Static list of languages to use for lingua-go language detection
@@ -42,6 +51,18 @@ var (
 	processedPosts  int64
 )
 
+// Add a pool for the FeedPost struct to reduce GC pressure
+// Instead of allocating new FeedPost structs for every post,
+// we can reuse structs from the pool to avoid unnecessary allocations
+// This is neccessary as there are 1000s of posts per second
+var feedPostPool = sync.Pool{
+	New: func() interface{} {
+		return &appbsky.FeedPost{
+			Langs: make([]string, 4),
+		}
+	},
+}
+
 // Subscribe to the firehose using the Firehose struct as a receiver
 func Subscribe(ctx context.Context, postChan chan interface{}, ticker *time.Ticker, seq int64) {
 
@@ -55,8 +76,12 @@ func Subscribe(ctx context.Context, postChan chan interface{}, ticker *time.Tick
 	}
 	// Identify dialer with User-Agent header
 
-	dialer := websocket.DefaultDialer
-	dialer.HandshakeTimeout = 30 * time.Second
+	dialer := websocket.Dialer{
+		ReadBufferSize:   wsReadBufferSize,
+		WriteBufferSize:  wsWriteBufferSize,
+		HandshakeTimeout: 30 * time.Second,
+	}
+
 	backoff := backoff.NewExponentialBackOff()
 	backoff.InitialInterval = 1 * time.Second
 	backoff.MaxInterval = 600 * time.Second
@@ -205,8 +230,17 @@ func eventProcessor(postChan chan interface{}, context context.Context, ticker *
 						continue
 					}
 
-					var post = appbsky.FeedPost{} // Unmarshal JSON formatted record into a FeedPost
-					err = json.Unmarshal(jsonRecord, &post)
+					// Use FeedPost pool to get a FeedPost
+					post := feedPostPool.Get().(*appbsky.FeedPost)
+					defer feedPostPool.Put(post)
+
+					// Reset to avoid data leaks
+					*post = appbsky.FeedPost{
+						// Reuse the same langs slice, but clear any values
+						Langs: post.Langs[:0],
+					}
+
+					err = json.Unmarshal(jsonRecord, post)
 					if err != nil {
 						continue
 					}
