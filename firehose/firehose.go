@@ -40,6 +40,7 @@ const (
 var languages = []lingua.Language{
 	lingua.Bokmal,
 	lingua.Nynorsk,
+	lingua.English,
 }
 
 var detector = lingua.NewLanguageDetectorBuilder().FromLanguages(languages...).Build()
@@ -248,12 +249,12 @@ func eventProcessor(postChan chan interface{}, context context.Context, ticker *
 					// Contains any of the languages in the post that are one of the following: nb, nn, se
 					if lo.Some(post.Langs, []string{"no", "nb", "nn", "se"}) {
 
-						// If tagged as no, nb, nn we need to detect the language to weed out false positives
+						// If tagged as no, nb, nn we need to detect the language
 						if lo.Some(post.Langs, []string{"no", "nb", "nn"}) {
 							// Detect language
-							_, exists := detector.DetectLanguageOf(post.Text)
-							if !exists {
-								log.Warn("Not norwegian, skipping")
+							lang, exists := detector.DetectLanguageOf(post.Text)
+							if !exists || lang == lingua.English {
+								log.Debug("Not norwegian or is english, skipping")
 								continue
 							}
 
