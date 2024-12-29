@@ -16,13 +16,19 @@ require (
 	github.com/labstack/gommon v0.4.2
 	github.com/samber/lo v1.47.0
 	github.com/sirupsen/logrus v1.9.3
+	github.com/stretchr/testify v1.9.0
 	github.com/strideynet/bsky-furry-feed v0.0.74
 	github.com/urfave/cli/v2 v2.27.5
 	github.com/valyala/fasthttp v1.57.0
 	golang.org/x/crypto/x509roots/fallback v0.0.0-20241107225453-6018723c7405
 )
 
-require github.com/shopspring/decimal v1.3.1 // indirect
+require (
+	github.com/davecgh/go-spew v1.1.1 // indirect
+	github.com/pmezard/go-difflib v1.0.0 // indirect
+	github.com/shopspring/decimal v1.3.1 // indirect
+	gopkg.in/yaml.v3 v3.0.1 // indirect
+)
 
 require (
 	github.com/RussellLuo/slidingwindow v0.0.0-20200528002341-535bb99d338b // indirect

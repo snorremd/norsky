@@ -37,10 +37,15 @@ const (
 )
 
 // We use all languages so as to reliably separate Norwegian from other European languages
-var detector = lingua.NewLanguageDetectorBuilder().FromLanguages(lingua.AllLanguages()...).WithMinimumRelativeDistance(0.25).Build()
+var detector lingua.LanguageDetector
+
+func InitDetector() {
+	if detector == nil {
+		detector = lingua.NewLanguageDetectorBuilder().FromLanguages(lingua.AllLanguages()...).WithMinimumRelativeDistance(0.25).Build()
+	}
+}
 
 // Keep track of processed event and posts count to show stats in the web interface
-
 var (
 	processedEvents int64
 	processedPosts  int64
@@ -59,7 +64,7 @@ var feedPostPool = sync.Pool{
 }
 
 // Add this helper function at package level
-func hasEnoughNorwegianLetters(text string) bool {
+func HasEnoughNorwegianLetters(text string) bool {
 	if len(text) == 0 {
 		return false
 	}
@@ -83,6 +88,8 @@ func hasEnoughNorwegianLetters(text string) bool {
 
 // Subscribe to the firehose using the Firehose struct as a receiver
 func Subscribe(ctx context.Context, postChan chan interface{}, ticker *time.Ticker, seq int64, detectFalseNegatives bool) {
+
+	InitDetector()
 
 	address := "wss://bsky.network/xrpc/com.atproto.sync.subscribeRepos"
 	headers := http.Header{}
@@ -225,8 +232,8 @@ type PostProcessor struct {
 }
 
 // Move language detection logic to its own function
-func (p *PostProcessor) detectNorwegianLanguage(text string, currentLangs []string) (bool, []string) {
-	if !hasEnoughNorwegianLetters(text) {
+func (p *PostProcessor) DetectNorwegianLanguage(text string, currentLangs []string) (bool, []string) {
+	if !HasEnoughNorwegianLetters(text) {
 		return false, currentLangs
 	}
 
@@ -254,14 +261,22 @@ func (p *PostProcessor) detectNorwegianLanguage(text string, currentLangs []stri
 func (p *PostProcessor) processPost(evt *atproto.SyncSubscribeRepos_Commit, op *atproto.SyncSubscribeRepos_RepoOp, record *appbsky.FeedPost) error {
 	uri := fmt.Sprintf("at://%s/%s", evt.Repo, op.Path)
 
+	// Filter out posts tagged with other languages
+	if len(record.Langs) > 0 && !lo.Some(record.Langs, []string{"no", "nb", "nn", "se", "en"}) {
+		log.Debugf("Skipping post with languages: %v", record.Langs)
+		return nil
+	}
+
 	shouldProcess := false
 	langs := record.Langs
 
 	if p.detectFalseNegatives {
-		shouldProcess, langs = p.detectNorwegianLanguage(record.Text, record.Langs)
+		shouldProcess, langs = p.DetectNorwegianLanguage(record.Text, record.Langs)
 	} else if lo.Some(record.Langs, []string{"no", "nb", "nn", "se"}) {
-		shouldProcess, langs = p.detectNorwegianLanguage(record.Text, record.Langs)
+		shouldProcess, langs = p.DetectNorwegianLanguage(record.Text, record.Langs)
 	}
+
+	log.Infof("Should process: %t, langs: %v", shouldProcess, langs)
 
 	if !shouldProcess {
 		return nil
@@ -359,4 +374,9 @@ func eventProcessor(postChan chan interface{}, context context.Context, ticker *
 			return nil
 		},
 	}
+}
+
+// GetDetector returns the package-level detector for testing
+func GetDetector() lingua.LanguageDetector {
+	return detector
 }
