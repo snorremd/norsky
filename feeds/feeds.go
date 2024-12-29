@@ -94,7 +94,7 @@ var Feeds = map[string]Feed{
 	},
 	"all": {
 		Id:          "all",
-		DisplayName: "Norwegian languages",
+		DisplayName: "Norsk (Norwegian)",
 		Description: "A feed of Bluesky posts written in Norwegian bokmål, nynorsk and sami",
 		Algorithm:   all,
 	},
