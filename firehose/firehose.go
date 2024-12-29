@@ -35,15 +35,8 @@ const (
 	eventBufferSize   = 10000     // Increase from 1000
 )
 
-// Static list of languages to use for lingua-go language detection
-
-var languages = []lingua.Language{
-	lingua.Bokmal,
-	lingua.Nynorsk,
-	lingua.English,
-}
-
-var detector = lingua.NewLanguageDetectorBuilder().FromLanguages(languages...).Build()
+// We use all languages so as to reliably separate Norwegian from other European languages
+var detector = lingua.NewLanguageDetectorBuilder().FromLanguages(lingua.AllLanguages()...).WithMinimumRelativeDistance(0.25).Build()
 
 // Keep track of processed event and posts count to show stats in the web interface
 
@@ -59,13 +52,36 @@ var (
 var feedPostPool = sync.Pool{
 	New: func() interface{} {
 		return &appbsky.FeedPost{
-			Langs: make([]string, 4),
+			Langs: make([]string, 0, 4),
 		}
 	},
 }
 
+// Add this helper function at package level
+func hasEnoughNorwegianLetters(text string) bool {
+	if len(text) == 0 {
+		return false
+	}
+
+	// Count Norwegian alphabet letters (including æøå)
+	letterCount := 0
+	for _, char := range text {
+		// a-z, A-Z, æøå, ÆØÅ
+		if (char >= 'a' && char <= 'z') ||
+			(char >= 'A' && char <= 'Z') ||
+			char == 'æ' || char == 'ø' || char == 'å' ||
+			char == 'Æ' || char == 'Ø' || char == 'Å' {
+			letterCount++
+		}
+	}
+
+	// If less than 30% of the text is letters, skip it
+	ratio := float64(letterCount) / float64(len(text))
+	return ratio > 0.30
+}
+
 // Subscribe to the firehose using the Firehose struct as a receiver
-func Subscribe(ctx context.Context, postChan chan interface{}, ticker *time.Ticker, seq int64) {
+func Subscribe(ctx context.Context, postChan chan interface{}, ticker *time.Ticker, seq int64, detectFalseNegatives bool) {
 
 	address := "wss://bsky.network/xrpc/com.atproto.sync.subscribeRepos"
 	headers := http.Header{}
@@ -144,7 +160,7 @@ func Subscribe(ctx context.Context, postChan chan interface{}, ticker *time.Tick
 				return conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 			})
 
-			scheduler := sequential.NewScheduler(conn.RemoteAddr().String(), eventProcessor(postChan, ctx, ticker).EventHandler)
+			scheduler := sequential.NewScheduler(conn.RemoteAddr().String(), eventProcessor(postChan, ctx, ticker, detectFalseNegatives).EventHandler)
 			err = events.HandleRepoStream(ctx, conn, scheduler)
 
 			// If error sleep
@@ -190,97 +206,147 @@ func MonitorFirehoseStats(ctx context.Context, statisticsChan chan models.Statis
 	}
 }
 
-func eventProcessor(postChan chan interface{}, context context.Context, ticker *time.Ticker) *events.RepoStreamCallbacks {
-	streamCallbacks := &events.RepoStreamCallbacks{
+// Add new types to help organize the code
+type PostProcessor struct {
+	postChan             chan interface{}
+	context              context.Context
+	ticker               *time.Ticker
+	detectFalseNegatives bool
+}
+
+// Move language detection logic to its own function
+func (p *PostProcessor) detectNorwegianLanguage(text string, currentLangs []string) (bool, []string) {
+	if !hasEnoughNorwegianLetters(text) {
+		return false, currentLangs
+	}
+
+	lang, exists := detector.DetectLanguageOf(text)
+	if !exists || lang == lingua.English || (lang != lingua.Bokmal && lang != lingua.Nynorsk) {
+		return false, currentLangs
+	}
+
+	// Create new slice to avoid modifying the input
+	updatedLangs := make([]string, len(currentLangs))
+	copy(updatedLangs, currentLangs)
+
+	// Add detected language if not present
+	if lang == lingua.Bokmal && !lo.Contains(updatedLangs, "nb") {
+		updatedLangs = append(updatedLangs, "nb")
+	} else if lang == lingua.Nynorsk && !lo.Contains(updatedLangs, "nn") {
+		updatedLangs = append(updatedLangs, "nn")
+	}
+
+	log.Infof("Detected language: %s for post tagged as %s: %s", lang.String(), currentLangs, text)
+	return true, updatedLangs
+}
+
+// Handle post processing logic
+func (p *PostProcessor) processPost(evt *atproto.SyncSubscribeRepos_Commit, op *atproto.SyncSubscribeRepos_RepoOp, record *appbsky.FeedPost) error {
+	uri := fmt.Sprintf("at://%s/%s", evt.Repo, op.Path)
+
+	shouldProcess := false
+	langs := record.Langs
+
+	if p.detectFalseNegatives {
+		shouldProcess, langs = p.detectNorwegianLanguage(record.Text, record.Langs)
+	} else if lo.Some(record.Langs, []string{"no", "nb", "nn", "se"}) {
+		shouldProcess, langs = p.detectNorwegianLanguage(record.Text, record.Langs)
+	}
+
+	if !shouldProcess {
+		return nil
+	}
+
+	// Process the post
+	p.ticker.Reset(5 * time.Minute)
+
+	// Send sequence event
+	p.postChan <- models.ProcessSeqEvent{
+		Seq: evt.Seq,
+	}
+
+	// Parse and send create post event
+	createdAt, err := time.Parse(time.RFC3339, record.CreatedAt)
+	if err != nil {
+		return fmt.Errorf("failed to parse creation time: %w", err)
+	}
+
+	p.postChan <- models.CreatePostEvent{
+		Post: models.Post{
+			Uri:       uri,
+			CreatedAt: createdAt.Unix(),
+			Text:      record.Text,
+			Languages: langs,
+		},
+	}
+
+	return nil
+}
+
+// Main event processor function is now more focused
+func eventProcessor(postChan chan interface{}, context context.Context, ticker *time.Ticker, detectFalseNegatives bool) *events.RepoStreamCallbacks {
+	processor := &PostProcessor{
+		postChan:             postChan,
+		context:              context,
+		ticker:               ticker,
+		detectFalseNegatives: detectFalseNegatives,
+	}
+
+	return &events.RepoStreamCallbacks{
 		RepoCommit: func(evt *atproto.SyncSubscribeRepos_Commit) error {
-			// Keep track of processed events
 			atomic.AddInt64(&processedEvents, 1)
 
 			rr, err := repo.ReadRepoFromCar(context, bytes.NewReader(evt.Blocks))
 			if err != nil {
-				log.Errorf("Error reading repo from car: %s", err)
-				return nil
+				return fmt.Errorf("failed to read repo from car: %w", err)
 			}
-			// Get operations by type
+
 			for _, op := range evt.Ops {
+				// Skip non-post operations
 				if strings.Split(op.Path, "/")[0] != "app.bsky.feed.post" {
-					continue // Skip if not a post, e.g. like, follow, etc.
+					continue
 				}
 
-				uri := fmt.Sprintf("at://%s/%s", evt.Repo, op.Path)
-				event_type := repomgr.EventKind(op.Action)
+				if op.Action != string(repomgr.EvtKindCreateRecord) &&
+					op.Action != string(repomgr.EvtKindUpdateRecord) {
+					continue
+				}
 
-				switch event_type {
-				case repomgr.EvtKindCreateRecord, repomgr.EvtKindUpdateRecord:
-					// Keep track of processed posts
-					atomic.AddInt64(&processedPosts, 1)
+				atomic.AddInt64(&processedPosts, 1)
 
-					ticker.Reset(5 * time.Minute)
-					_, rec, err := rr.GetRecord(context, op.Path)
-					if err != nil {
-						continue
-					}
+				// Get and decode record
+				_, rec, err := rr.GetRecord(context, op.Path)
+				if err != nil {
+					log.Warnf("Failed to get record: %v", err)
+					continue
+				}
 
-					decoder := lexutil.LexiconTypeDecoder{
-						Val: rec,
-					}
+				post := feedPostPool.Get().(*appbsky.FeedPost)
+				defer feedPostPool.Put(post)
 
-					jsonRecord, err := decoder.MarshalJSON() // The LexiconTypeDecoder will decode the record into a JSON representation
+				// Reset post to clean state
+				*post = appbsky.FeedPost{
+					Langs: make([]string, 0, 4),
+				}
 
-					if err != nil {
-						continue
-					}
+				// Decode record
+				decoder := lexutil.LexiconTypeDecoder{Val: rec}
+				jsonRecord, err := decoder.MarshalJSON()
+				if err != nil {
+					log.Warnf("Failed to marshal record: %v", err)
+					continue
+				}
 
-					// Use FeedPost pool to get a FeedPost
-					post := feedPostPool.Get().(*appbsky.FeedPost)
-					defer feedPostPool.Put(post)
+				if err := json.Unmarshal(jsonRecord, post); err != nil {
+					log.Warnf("Failed to unmarshal record: %v", err)
+					continue
+				}
 
-					// Reset to avoid data leaks
-					*post = appbsky.FeedPost{
-						// Reuse the same langs slice, but clear any values
-						Langs: post.Langs[:0],
-					}
-
-					err = json.Unmarshal(jsonRecord, post)
-					if err != nil {
-						continue
-					}
-
-					// Contains any of the languages in the post that are one of the following: nb, nn, se
-					if lo.Some(post.Langs, []string{"no", "nb", "nn", "se"}) {
-
-						// If tagged as no, nb, nn we need to detect the language
-						if lo.Some(post.Langs, []string{"no", "nb", "nn"}) {
-							// Detect language
-							lang, exists := detector.DetectLanguageOf(post.Text)
-							if !exists || lang == lingua.English {
-								log.Debug("Not norwegian or is english, skipping")
-								continue
-							}
-
-							// Keep track of what commits we have processed
-							postChan <- models.ProcessSeqEvent{
-								Seq: evt.Seq,
-							}
-							createdAt, err := time.Parse(time.RFC3339, post.CreatedAt)
-							if err == nil {
-								postChan <- models.CreatePostEvent{
-									Post: models.Post{
-										Uri:       uri,
-										CreatedAt: createdAt.Unix(),
-										Text:      post.Text,
-										Languages: post.Langs,
-									},
-								}
-							}
-						}
-					}
+				if err := processor.processPost(evt, op, post); err != nil {
+					log.Warnf("Failed to process post: %v", err)
 				}
 			}
-
 			return nil
 		},
 	}
-
-	return streamCallbacks
 }
