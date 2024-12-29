@@ -86,6 +86,87 @@ func HasEnoughNorwegianLetters(text string) bool {
 	return ratio > 0.30
 }
 
+// Rename and update the function to handle both NSFW and spam detection
+func containsSpamContent(text string) bool {
+	// Convert to lowercase for case-insensitive matching
+	lowerText := strings.ToLower(text)
+
+	// Common spam patterns
+	spamPatterns := []string{
+		"onlyfans.com",
+		"join my vip",
+		"subscribe to my",
+		"check my profile",
+		"check my bio",
+		"link in bio",
+		"link in profile",
+		"follow me",
+		"follow back",
+		"follow for follow",
+		"f4f",
+	}
+
+	// NSFW terms - keep this minimal to avoid false positives
+	nsfwTerms := []string{
+		"porn",
+		"xxx",
+		"nsfw",
+		"18+",
+	}
+
+	// Check for spam patterns
+	for _, pattern := range spamPatterns {
+		if strings.Contains(lowerText, pattern) {
+			return true
+		}
+	}
+
+	// Check for NSFW terms
+	for _, term := range nsfwTerms {
+		if strings.Contains(lowerText, term) {
+			return true
+		}
+	}
+
+	// Check for excessive emoji spam (common in NSFW spam)
+	emojiCount := 0
+	for _, r := range text {
+		if r >= 0x1F300 { // Start of emoji range
+			emojiCount++
+			if emojiCount > 8 { // Threshold for spam
+				return true
+			}
+		}
+	}
+
+	// Count hashtags
+	hashtagCount := strings.Count(text, "#")
+	// If more than 5 hashtags, consider it spam
+	if hashtagCount > 5 {
+		log.Infof("Skipping spam post with many hashtags: %s", text)
+		return true
+	}
+
+	// Check for repeated hashtags (common spam pattern)
+	if strings.Count(text, "##") > 0 {
+		log.Infof("Skipping spam post with repeated hashtags: %s", text)
+		return true
+	}
+
+	// Check for hashtag ratio
+	words := strings.Fields(text)
+	if len(words) > 0 {
+		hashtagRatio := float64(hashtagCount) / float64(len(words))
+		// If more than 40% of words are hashtags, consider it spam
+		if hashtagRatio > 0.4 {
+			log.Infof("Skipping spam post with high hashtag ratio: %s", text)
+			return true
+		}
+	}
+
+	return false
+}
+
 // Subscribe to the firehose using the Firehose struct as a receiver
 func Subscribe(ctx context.Context, postChan chan interface{}, ticker *time.Ticker, seq int64, detectFalseNegatives bool) {
 
@@ -276,9 +357,13 @@ func (p *PostProcessor) processPost(evt *atproto.SyncSubscribeRepos_Commit, op *
 		shouldProcess, langs = p.DetectNorwegianLanguage(record.Text, record.Langs)
 	}
 
-	log.Infof("Should process: %t, langs: %v", shouldProcess, langs)
-
 	if !shouldProcess {
+		return nil
+	}
+
+	// Check for spam content after confirming it's Norwegian
+	if containsSpamContent(record.Text) {
+		log.Debugf("Skipping spam post: %s", uri)
 		return nil
 	}
 
