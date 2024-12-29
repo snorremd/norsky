@@ -139,27 +139,36 @@ func containsSpamContent(text string) bool {
 		}
 	}
 
-	// Count hashtags
+	// Count hashtags and mentions
 	hashtagCount := strings.Count(text, "#")
+	mentionCount := strings.Count(text, "@")
+
 	// If more than 5 hashtags, consider it spam
 	if hashtagCount > 5 {
 		log.Infof("Skipping spam post with many hashtags: %s", text)
 		return true
 	}
 
-	// Check for repeated hashtags (common spam pattern)
-	if strings.Count(text, "##") > 0 {
-		log.Infof("Skipping spam post with repeated hashtags: %s", text)
+	// If more than 5 mentions, consider it spam
+	if mentionCount > 5 {
+		log.Infof("Skipping spam post with many mentions: %s", text)
 		return true
 	}
 
-	// Check for hashtag ratio
+	// Check for repeated hashtags or mentions (common spam pattern)
+	if strings.Count(text, "##") > 0 || strings.Count(text, "@@") > 0 {
+		log.Infof("Skipping spam post with repeated hashtags/mentions: %s", text)
+		return true
+	}
+
+	// Check for hashtag and mention ratios
 	words := strings.Fields(text)
 	if len(words) > 0 {
-		hashtagRatio := float64(hashtagCount) / float64(len(words))
-		// If more than 40% of words are hashtags, consider it spam
-		if hashtagRatio > 0.4 {
-			log.Infof("Skipping spam post with high hashtag ratio: %s", text)
+		// Calculate combined ratio of hashtags and mentions
+		symbolRatio := float64(hashtagCount+mentionCount) / float64(len(words))
+		// If more than 50% of words are hashtags or mentions combined, consider it spam
+		if symbolRatio > 0.5 {
+			log.Infof("Skipping spam post with high hashtag/mention ratio: %s", text)
 			return true
 		}
 	}
