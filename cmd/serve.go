@@ -18,6 +18,10 @@ import (
 	"github.com/urfave/cli/v2"
 )
 
+type contextKey string
+
+const cancelKey contextKey = "cancel"
+
 func serveCmd() *cli.Command {
 
 	return &cli.Command{
@@ -56,6 +60,12 @@ func serveCmd() *cli.Command {
 				Usage:   "Port of the server",
 				EnvVars: []string{"NORSKY_PORT"},
 				Value:   3000,
+			},
+			&cli.BoolFlag{
+				Name:    "detect-false-negatives",
+				Usage:   "Run language detection on all posts, even if they are not tagged with correct language",
+				EnvVars: []string{"NORSKY_DETECT_FALSE_NEGATIVES"},
+				Value:   false,
 			},
 		},
 
@@ -144,7 +154,7 @@ func serveCmd() *cli.Command {
 					}
 				}()
 				fmt.Println("Subscribing to firehose...")
-				firehose.Subscribe(firehoseCtx, postChan, livenessTicker, seq)
+				firehose.Subscribe(firehoseCtx, postChan, livenessTicker, seq, ctx.Bool("detect-false-negatives"))
 			}()
 
 			go func() {
@@ -183,16 +193,16 @@ func serveCmd() *cli.Command {
 							log.Warn("Firehose inactive for 15 minutes, restarting connection")
 
 							// Cancel existing context
-							if cancel, ok := firehoseCtx.Value("cancel").(context.CancelFunc); ok {
+							if cancel, ok := firehoseCtx.Value(cancelKey).(context.CancelFunc); ok {
 								cancel()
 							}
 
 							// Create new context with cancel
 							firehoseCtx, cancel := context.WithCancel(ctx.Context)
-							firehoseCtx = context.WithValue(firehoseCtx, "cancel", cancel)
+							firehoseCtx = context.WithValue(firehoseCtx, cancelKey, cancel)
 
 							// Restart subscription in new goroutine
-							go firehose.Subscribe(firehoseCtx, postChan, livenessTicker, seq)
+							go firehose.Subscribe(firehoseCtx, postChan, livenessTicker, seq, ctx.Bool("detect-false-negatives"))
 						}
 					}
 				}
