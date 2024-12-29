@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"norsky/models"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -16,7 +17,7 @@ import (
 	"github.com/bluesky-social/indigo/api/atproto"
 	appbsky "github.com/bluesky-social/indigo/api/bsky"
 	"github.com/bluesky-social/indigo/events"
-	"github.com/bluesky-social/indigo/events/schedulers/sequential"
+	"github.com/bluesky-social/indigo/events/schedulers/autoscaling"
 	lexutil "github.com/bluesky-social/indigo/lex/util"
 	"github.com/bluesky-social/indigo/repo"
 	"github.com/bluesky-social/indigo/repomgr"
@@ -160,7 +161,16 @@ func Subscribe(ctx context.Context, postChan chan interface{}, ticker *time.Tick
 				return conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 			})
 
-			scheduler := sequential.NewScheduler(conn.RemoteAddr().String(), eventProcessor(postChan, ctx, ticker, detectFalseNegatives).EventHandler)
+			scheduler := autoscaling.NewScheduler(
+				autoscaling.AutoscaleSettings{
+					MaxConcurrency:           runtime.NumCPU(),
+					Concurrency:              2,
+					AutoscaleFrequency:       5 * time.Second,
+					ThroughputBucketDuration: 1 * time.Second,
+					ThroughputBucketCount:    10,
+				},
+				conn.RemoteAddr().String(),
+				eventProcessor(postChan, ctx, ticker, detectFalseNegatives).EventHandler)
 			err = events.HandleRepoStream(ctx, conn, scheduler)
 
 			// If error sleep
