@@ -176,6 +176,67 @@ func containsSpamContent(text string) bool {
 	return false
 }
 
+// Add this helper function
+func containsRepetitivePattern(text string) bool {
+	// Convert to lowercase for consistent matching
+	text = strings.ToLower(text)
+
+	// Remove spaces for pattern detection
+	text = strings.ReplaceAll(text, " ", "")
+
+	if len(text) < 4 {
+		return false
+	}
+
+	// Check for repeating characters (e.g., "aaaaa")
+	repeatingChars := 0
+	lastChar := rune(0)
+	for _, char := range text {
+		if char == lastChar {
+			repeatingChars++
+			if repeatingChars >= 4 {
+				return true
+			}
+		} else {
+			repeatingChars = 1
+			lastChar = char
+		}
+	}
+
+	// Check for repeating patterns up to 8 characters long
+	for patternLen := 2; patternLen <= 8; patternLen++ {
+		if len(text) < patternLen*2 {
+			continue
+		}
+
+		// Look for patterns that repeat at least twice
+		for i := 0; i <= len(text)-patternLen*2; i++ {
+			pattern := text[i : i+patternLen]
+			repeats := 1
+
+			// Count how many times the pattern repeats
+			for j := i + patternLen; j <= len(text)-patternLen; j += patternLen {
+				if text[j:j+patternLen] == pattern {
+					repeats++
+					// Require fewer repeats for longer patterns
+					minRepeats := 4
+					if patternLen >= 4 {
+						minRepeats = 2
+					}
+					if repeats >= minRepeats {
+						log.Debugf("Found repeating pattern '%s' (%d times)", pattern, repeats)
+						return true
+					}
+				} else {
+					break
+				}
+			}
+		}
+	}
+
+	return false
+}
+
 // Subscribe to the firehose using the Firehose struct as a receiver
 func Subscribe(ctx context.Context, postChan chan interface{}, ticker *time.Ticker, seq int64, detectFalseNegatives bool, confidenceThreshold float64) {
 	// Validate confidence threshold
@@ -330,6 +391,12 @@ type PostProcessor struct {
 // Move language detection logic to its own function
 func (p *PostProcessor) DetectNorwegianLanguage(text string, currentLangs []string) (bool, []string) {
 	if !HasEnoughNorwegianLetters(text) {
+		return false, currentLangs
+	}
+
+	// Check for repetitive patterns early
+	if containsRepetitivePattern(text) {
+		log.Debugf("Skipping post with repetitive pattern: %s", text)
 		return false, currentLangs
 	}
 
