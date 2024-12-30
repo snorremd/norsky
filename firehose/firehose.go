@@ -396,6 +396,13 @@ func (p *PostProcessor) processPost(evt *atproto.SyncSubscribeRepos_Commit, op *
 		return nil
 	}
 
+	// Check minimum word count (at least 4 words)
+	words := strings.Fields(record.Text)
+	if len(words) < 4 {
+		log.Debugf("Skipping short post with only %d words: %s", len(words), uri)
+		return nil
+	}
+
 	// Check for spam content after confirming it's Norwegian
 	if containsSpamContent(record.Text) {
 		log.Debugf("Skipping spam post: %s", uri)
