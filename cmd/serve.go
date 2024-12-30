@@ -67,6 +67,12 @@ func serveCmd() *cli.Command {
 				EnvVars: []string{"NORSKY_DETECT_FALSE_NEGATIVES"},
 				Value:   false,
 			},
+			&cli.Float64Flag{
+				Name:    "confidence-threshold",
+				Usage:   "Minimum confidence threshold for language detection",
+				EnvVars: []string{"NORSKY_CONFIDENCE_THRESHOLD"},
+				Value:   0.6,
+			},
 		},
 
 		Action: func(ctx *cli.Context) error {
@@ -77,10 +83,15 @@ func serveCmd() *cli.Command {
 			hostname := ctx.String("hostname")
 			host := ctx.String("host")
 			port := ctx.Int("port")
-
+			confidenceThreshold := ctx.Float64("confidence-threshold")
+			detectFalseNegatives := ctx.Bool("detect-false-negatives")
 			// Check if any of the required flags are missing
 			if hostname == "" {
 				return errors.New("missing required flag: --hostname")
+			}
+
+			if confidenceThreshold < 0 || confidenceThreshold > 1.0 {
+				return errors.New("confidence-threshold must be between 0 and 1")
 			}
 
 			err := db.Migrate(database)
@@ -154,7 +165,7 @@ func serveCmd() *cli.Command {
 					}
 				}()
 				fmt.Println("Subscribing to firehose...")
-				firehose.Subscribe(firehoseCtx, postChan, livenessTicker, seq, ctx.Bool("detect-false-negatives"))
+				firehose.Subscribe(firehoseCtx, postChan, livenessTicker, seq, detectFalseNegatives, confidenceThreshold)
 			}()
 
 			go func() {
@@ -202,7 +213,7 @@ func serveCmd() *cli.Command {
 							firehoseCtx = context.WithValue(firehoseCtx, cancelKey, cancel)
 
 							// Restart subscription in new goroutine
-							go firehose.Subscribe(firehoseCtx, postChan, livenessTicker, seq, ctx.Bool("detect-false-negatives"))
+							go firehose.Subscribe(firehoseCtx, postChan, livenessTicker, seq, ctx.Bool("detect-false-negatives"), ctx.Float64("confidence-threshold"))
 						}
 					}
 				}

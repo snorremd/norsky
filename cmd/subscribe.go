@@ -30,6 +30,19 @@ Returns each post as a JSON object on a single line. Use a tool like jq to proce
 the output.
 
 Prints all other log messages to stderr.`,
+		Flags: []cli.Flag{
+			&cli.BoolFlag{
+				Name:    "detect-false-negatives",
+				Usage:   "Detect false negatives in language detection",
+				EnvVars: []string{"NORSKY_DETECT_FALSE_NEGATIVES"},
+			},
+			&cli.Float64Flag{
+				Name:    "confidence-threshold",
+				Usage:   "Confidence threshold for language detection (0-1)",
+				EnvVars: []string{"NORSKY_CONFIDENCE_THRESHOLD"},
+				Value:   0.6,
+			},
+		},
 		Action: func(ctx *cli.Context) error {
 			// Get the context for this process to pass to firehose
 
@@ -43,7 +56,14 @@ Prints all other log messages to stderr.`,
 
 			go func() {
 				fmt.Println("Subscribing to firehose...")
-				firehose.Subscribe(ctx.Context, postChan, ticker, -1, ctx.Bool("detect-false-negatives"))
+				firehose.Subscribe(
+					ctx.Context,
+					postChan,
+					ticker,
+					-1,
+					ctx.Bool("detect-false-negatives"),
+					ctx.Float64("confidence-threshold"),
+				)
 			}()
 
 			go func() {

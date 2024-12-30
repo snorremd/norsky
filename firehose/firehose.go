@@ -177,7 +177,12 @@ func containsSpamContent(text string) bool {
 }
 
 // Subscribe to the firehose using the Firehose struct as a receiver
-func Subscribe(ctx context.Context, postChan chan interface{}, ticker *time.Ticker, seq int64, detectFalseNegatives bool) {
+func Subscribe(ctx context.Context, postChan chan interface{}, ticker *time.Ticker, seq int64, detectFalseNegatives bool, confidenceThreshold float64) {
+	// Validate confidence threshold
+	if confidenceThreshold < 0 || confidenceThreshold > 1 {
+		log.Warnf("Invalid confidence threshold %f, using default 0.6", confidenceThreshold)
+		confidenceThreshold = 0.6
+	}
 
 	InitDetector()
 
@@ -267,7 +272,7 @@ func Subscribe(ctx context.Context, postChan chan interface{}, ticker *time.Tick
 					ThroughputBucketCount:    10,
 				},
 				conn.RemoteAddr().String(),
-				eventProcessor(postChan, ctx, ticker, detectFalseNegatives).EventHandler)
+				eventProcessor(postChan, ctx, ticker, detectFalseNegatives, confidenceThreshold).EventHandler)
 			err = events.HandleRepoStream(ctx, conn, scheduler)
 
 			// If error sleep
@@ -319,6 +324,7 @@ type PostProcessor struct {
 	context              context.Context
 	ticker               *time.Ticker
 	detectFalseNegatives bool
+	confidenceThreshold  float64
 }
 
 // Move language detection logic to its own function
@@ -327,8 +333,29 @@ func (p *PostProcessor) DetectNorwegianLanguage(text string, currentLangs []stri
 		return false, currentLangs
 	}
 
-	lang, exists := detector.DetectLanguageOf(text)
-	if !exists || lang == lingua.English || (lang != lingua.Bokmal && lang != lingua.Nynorsk) {
+	// If more than 30% of words are hashtags, skip language detection
+	words := strings.Fields(text)
+	if len(words) > 0 {
+		hashtagCount := strings.Count(text, "#")
+		hashtagRatio := float64(hashtagCount) / float64(len(words))
+		if hashtagRatio > 0.3 {
+			return false, currentLangs
+		}
+	}
+
+	detectedLang, exists := detector.DetectLanguageOf(text)
+	if !exists || detectedLang == lingua.English || (detectedLang != lingua.Bokmal && detectedLang != lingua.Nynorsk) {
+		return false, currentLangs
+	}
+
+	// Get confidence scores for norwegian languages between 0 and 1
+	bokmalConf := detector.ComputeLanguageConfidence(text, lingua.Bokmal)
+	nynorskConf := detector.ComputeLanguageConfidence(text, lingua.Nynorsk)
+
+	log.Infof("Bokmal confidence: %.2f, Nynorsk confidence: %.2f (threshold: %.2f)",
+		bokmalConf, nynorskConf, p.confidenceThreshold)
+
+	if bokmalConf < p.confidenceThreshold && nynorskConf < p.confidenceThreshold {
 		return false, currentLangs
 	}
 
@@ -337,13 +364,12 @@ func (p *PostProcessor) DetectNorwegianLanguage(text string, currentLangs []stri
 	copy(updatedLangs, currentLangs)
 
 	// Add detected language if not present
-	if lang == lingua.Bokmal && !lo.Contains(updatedLangs, "nb") {
+	if detectedLang == lingua.Bokmal && !lo.Contains(updatedLangs, "nb") {
 		updatedLangs = append(updatedLangs, "nb")
-	} else if lang == lingua.Nynorsk && !lo.Contains(updatedLangs, "nn") {
+	} else if detectedLang == lingua.Nynorsk && !lo.Contains(updatedLangs, "nn") {
 		updatedLangs = append(updatedLangs, "nn")
 	}
 
-	log.Infof("Detected language: %s for post tagged as %s: %s", lang.String(), currentLangs, text)
 	return true, updatedLangs
 }
 
@@ -403,12 +429,13 @@ func (p *PostProcessor) processPost(evt *atproto.SyncSubscribeRepos_Commit, op *
 }
 
 // Main event processor function is now more focused
-func eventProcessor(postChan chan interface{}, context context.Context, ticker *time.Ticker, detectFalseNegatives bool) *events.RepoStreamCallbacks {
+func eventProcessor(postChan chan interface{}, context context.Context, ticker *time.Ticker, detectFalseNegatives bool, confidenceThreshold float64) *events.RepoStreamCallbacks {
 	processor := &PostProcessor{
 		postChan:             postChan,
 		context:              context,
 		ticker:               ticker,
 		detectFalseNegatives: detectFalseNegatives,
+		confidenceThreshold:  confidenceThreshold,
 	}
 
 	return &events.RepoStreamCallbacks{
