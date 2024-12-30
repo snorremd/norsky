@@ -13,6 +13,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/bluesky-social/indigo/api/atproto"
 	appbsky "github.com/bluesky-social/indigo/api/bsky"
@@ -86,8 +88,106 @@ func HasEnoughNorwegianLetters(text string) bool {
 	return ratio > 0.30
 }
 
-// Rename and update the function to handle both NSFW and spam detection
-func containsSpamContent(text string) bool {
+// Rename to public functions
+func ContainsRepetitivePattern(text string) bool {
+	// Convert to lowercase for consistent matching
+	text = strings.ToLower(text)
+
+	// Remove spaces for pattern detection
+	text = strings.ReplaceAll(text, " ", "")
+
+	if len(text) < 4 {
+		return false
+	}
+
+	// Split text into grapheme clusters (complete Unicode symbols)
+	clusters := []string{}
+	for i := 0; i < len(text); {
+		r, size := utf8.DecodeRuneInString(text[i:])
+		if r == utf8.RuneError {
+			i++
+			continue
+		}
+
+		// Handle emoji modifiers and zero-width joiners
+		cluster := string(r)
+		i += size
+		for i < len(text) {
+			r, size = utf8.DecodeRuneInString(text[i:])
+			if r == utf8.RuneError {
+				break
+			}
+			// Check if it's a modifier or zero-width joiner
+			if unicode.Is(unicode.Mn, r) || // Modifier
+				r == '\u200d' || // Zero-width joiner
+				r == '\ufe0f' { // Variation selector
+				cluster += string(r)
+				i += size
+				continue
+			}
+			break
+		}
+		clusters = append(clusters, cluster)
+	}
+
+	// Check for repeating clusters
+	repeatingClusters := 0
+	lastCluster := ""
+	for _, cluster := range clusters {
+		if cluster == lastCluster {
+			repeatingClusters++
+			if repeatingClusters >= 4 {
+				return true
+			}
+		} else {
+			repeatingClusters = 1
+			lastCluster = cluster
+		}
+	}
+
+	// Check for repeating patterns up to 8 clusters long
+	for patternLen := 2; patternLen <= 8; patternLen++ {
+		if len(clusters) < patternLen*2 {
+			continue
+		}
+
+		// Look for patterns that repeat at least twice
+		for i := 0; i <= len(clusters)-patternLen*2; i++ {
+			pattern := clusters[i : i+patternLen]
+			repeats := 1
+
+			// Count how many times the pattern repeats
+			for j := i + patternLen; j <= len(clusters)-patternLen; j += patternLen {
+				matches := true
+				for k := 0; k < patternLen; k++ {
+					if clusters[j+k] != pattern[k] {
+						matches = false
+						break
+					}
+				}
+				if matches {
+					repeats++
+					// Require fewer repeats for longer patterns
+					minRepeats := 4
+					if patternLen >= 4 {
+						minRepeats = 2
+					}
+					if repeats >= minRepeats {
+						log.Debugf("Found repeating pattern '%v' (%d times)", pattern, repeats)
+						return true
+					}
+				} else {
+					break
+				}
+			}
+		}
+	}
+
+	return false
+}
+
+// Rename to public functions
+func ContainsSpamContent(text string) bool {
 	// Convert to lowercase for case-insensitive matching
 	lowerText := strings.ToLower(text)
 
@@ -170,67 +270,6 @@ func containsSpamContent(text string) bool {
 		if symbolRatio > 0.5 {
 			log.Infof("Skipping spam post with high hashtag/mention ratio: %s", text)
 			return true
-		}
-	}
-
-	return false
-}
-
-// Add this helper function
-func containsRepetitivePattern(text string) bool {
-	// Convert to lowercase for consistent matching
-	text = strings.ToLower(text)
-
-	// Remove spaces for pattern detection
-	text = strings.ReplaceAll(text, " ", "")
-
-	if len(text) < 4 {
-		return false
-	}
-
-	// Check for repeating characters (e.g., "aaaaa")
-	repeatingChars := 0
-	lastChar := rune(0)
-	for _, char := range text {
-		if char == lastChar {
-			repeatingChars++
-			if repeatingChars >= 4 {
-				return true
-			}
-		} else {
-			repeatingChars = 1
-			lastChar = char
-		}
-	}
-
-	// Check for repeating patterns up to 8 characters long
-	for patternLen := 2; patternLen <= 8; patternLen++ {
-		if len(text) < patternLen*2 {
-			continue
-		}
-
-		// Look for patterns that repeat at least twice
-		for i := 0; i <= len(text)-patternLen*2; i++ {
-			pattern := text[i : i+patternLen]
-			repeats := 1
-
-			// Count how many times the pattern repeats
-			for j := i + patternLen; j <= len(text)-patternLen; j += patternLen {
-				if text[j:j+patternLen] == pattern {
-					repeats++
-					// Require fewer repeats for longer patterns
-					minRepeats := 4
-					if patternLen >= 4 {
-						minRepeats = 2
-					}
-					if repeats >= minRepeats {
-						log.Debugf("Found repeating pattern '%s' (%d times)", pattern, repeats)
-						return true
-					}
-				} else {
-					break
-				}
-			}
 		}
 	}
 
@@ -390,26 +429,6 @@ type PostProcessor struct {
 
 // Move language detection logic to its own function
 func (p *PostProcessor) DetectNorwegianLanguage(text string, currentLangs []string) (bool, []string) {
-	if !HasEnoughNorwegianLetters(text) {
-		return false, currentLangs
-	}
-
-	// Check for repetitive patterns early
-	if containsRepetitivePattern(text) {
-		log.Debugf("Skipping post with repetitive pattern: %s", text)
-		return false, currentLangs
-	}
-
-	// If more than 30% of words are hashtags, skip language detection
-	words := strings.Fields(text)
-	if len(words) > 0 {
-		hashtagCount := strings.Count(text, "#")
-		hashtagRatio := float64(hashtagCount) / float64(len(words))
-		if hashtagRatio > 0.3 {
-			return false, currentLangs
-		}
-	}
-
 	detectedLang, exists := detector.DetectLanguageOf(text)
 	if !exists || detectedLang == lingua.English || (detectedLang != lingua.Bokmal && detectedLang != lingua.Nynorsk) {
 		return false, currentLangs
@@ -444,12 +463,38 @@ func (p *PostProcessor) DetectNorwegianLanguage(text string, currentLangs []stri
 func (p *PostProcessor) processPost(evt *atproto.SyncSubscribeRepos_Commit, op *atproto.SyncSubscribeRepos_RepoOp, record *appbsky.FeedPost) error {
 	uri := fmt.Sprintf("at://%s/%s", evt.Repo, op.Path)
 
-	// Filter out posts tagged with other languages
+	// 1. Check word count first (cheapest operation - just string splitting)
+	words := strings.Fields(record.Text)
+	if len(words) < 4 {
+		log.Debugf("Skipping short post with only %d words: %s", len(words), uri)
+		return nil
+	}
+
+	// 2. Filter out posts tagged with other languages (simple slice operation)
 	if len(record.Langs) > 0 && !lo.Some(record.Langs, []string{"no", "nb", "nn", "se", "en"}) {
 		log.Debugf("Skipping post with languages: %v", record.Langs)
 		return nil
 	}
 
+	// 3. Check letter ratio (fast character counting)
+	if !HasEnoughNorwegianLetters(record.Text) {
+		log.Debugf("Skipping post with insufficient letter ratio: %s", uri)
+		return nil
+	}
+
+	// 4. Check for repetitive patterns (string analysis)
+	if ContainsRepetitivePattern(record.Text) {
+		log.Debugf("Skipping post with repetitive pattern: %s", uri)
+		return nil
+	}
+
+	// 5. Check for spam content (string matching)
+	if ContainsSpamContent(record.Text) {
+		log.Debugf("Skipping spam post: %s", uri)
+		return nil
+	}
+
+	// 6. Language detection (most expensive operation)
 	shouldProcess := false
 	langs := record.Langs
 
@@ -460,19 +505,6 @@ func (p *PostProcessor) processPost(evt *atproto.SyncSubscribeRepos_Commit, op *
 	}
 
 	if !shouldProcess {
-		return nil
-	}
-
-	// Check minimum word count (at least 4 words)
-	words := strings.Fields(record.Text)
-	if len(words) < 4 {
-		log.Debugf("Skipping short post with only %d words: %s", len(words), uri)
-		return nil
-	}
-
-	// Check for spam content after confirming it's Norwegian
-	if containsSpamContent(record.Text) {
-		log.Debugf("Skipping spam post: %s", uri)
 		return nil
 	}
 
