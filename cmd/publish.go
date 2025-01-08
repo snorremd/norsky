@@ -11,7 +11,10 @@ import (
 	"os"
 	"time"
 
+	"norsky/config"
+
 	"github.com/bluesky-social/indigo/api/bsky"
+	lexutil "github.com/bluesky-social/indigo/lex/util"
 	"github.com/bluesky-social/indigo/util"
 	"github.com/cqroot/prompt"
 	"github.com/cqroot/prompt/input"
@@ -34,6 +37,13 @@ Registers the feed with your preferred name, description, etc.`,
 				Aliases: []string{"n"},
 				Usage:   "The hostname where the server is running",
 				EnvVars: []string{"NORSKY_HOSTNAME"},
+			},
+			&cli.StringFlag{
+				Name:    "config",
+				Aliases: []string{"c"},
+				Value:   "config/feeds.toml",
+				Usage:   "Path to feeds configuration file",
+				EnvVars: []string{"NORSKY_CONFIG"},
 			},
 		},
 		Action: func(ctx *cli.Context) error {
@@ -64,25 +74,19 @@ Registers the feed with your preferred name, description, etc.`,
 				return fmt.Errorf("could not create client with provided credentials: %w", err)
 			}
 
-			// Get the feed avatar from file
-			f, err := os.Open("./assets/avatar.png")
-			if err != nil {
-				return fmt.Errorf("could not open avatar file: %w", err)
-			}
-			defer f.Close()
-
-			blob, err := client.UploadBlob(ctx.Context, f)
-			if err != nil {
-				return fmt.Errorf("could not upload avatar blob: %w", err)
-			}
-
 			actorFeeds, err := client.GetActorFeeds(ctx.Context, handle)
 			if err != nil {
 				return fmt.Errorf("could not get actor feeds: %w", err)
 			}
 
-			for _, feed := range feeds.Feeds {
+			cfg, err := config.LoadConfig(ctx.String("config"))
+			if err != nil {
+				return fmt.Errorf("failed to load config: %w", err)
+			}
 
+			feedMap := feeds.InitializeFeeds(cfg)
+
+			for _, feed := range feedMap {
 				existingFeed, ok := lo.Find(actorFeeds.Feeds, func(f *bsky.FeedDefs_GeneratorView) bool {
 					parsed, err := util.ParseAtUri(f.Uri)
 					if err != nil {
@@ -92,9 +96,23 @@ Registers the feed with your preferred name, description, etc.`,
 				})
 
 				var cid *string
-
 				if ok && existingFeed != nil {
 					cid = &existingFeed.Cid
+				}
+
+				// Get the feed avatar from file
+				var blob *lexutil.LexBlob
+				if feed.AvatarPath != "" {
+					f, err := os.Open(feed.AvatarPath)
+					if err != nil {
+						return fmt.Errorf("could not open avatar file for feed %s: %w", feed.Id, err)
+					}
+					defer f.Close()
+
+					blob, err = client.UploadBlob(ctx.Context, f)
+					if err != nil {
+						return fmt.Errorf("could not upload avatar blob for feed %s: %w", feed.Id, err)
+					}
 				}
 
 				err := client.PutFeedGenerator(ctx.Context, feed.Id, &bsky.FeedGenerator{
@@ -112,7 +130,6 @@ Registers the feed with your preferred name, description, etc.`,
 			}
 
 			return nil
-
 		},
 	}
 }

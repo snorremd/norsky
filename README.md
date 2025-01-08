@@ -6,6 +6,11 @@ A dashboard is available at the root of the server `/`.
 The dashboard shows interesting statistics about the feed and Norwegian language posts.
 It is written in TypeScript using Solid.js and Tailwind CSS.
 
+> [!IMPORTANT]
+> Version 1.0.0 introduces breaking changes that require a new `feeds.toml` configuration file. The feed configuration has been moved from hardcoded values to a TOML file that allows you to configure multiple feeds with different language settings. See the example configuration in `feeds.example.toml` for reference.
+
+
+
 ## Installation
 
 The feed server is a standalone go binary that you can run on your machine.
@@ -73,11 +78,58 @@ norsky serve --hostname yourdomain.tld --port 8080 --database /path/to/db/feed.d
 docker run -d \
     --env=NORSKY_HOSTNAME="yourdomain.tld" \
     --env NORSKY_DATABASE="/db/feed.db" \
+    --env NORSKY_CONFIG="/feeds.toml" \
     --name norsky \
     -p 3000:3000 \
     -v /path/to/db:/db \
+    -v /path/to/feeds.toml:/feeds.toml \
     ghrc.io/snorreio/norsky:latest
 ```
+
+## Norsky server configuration
+
+The Norsky server is configured using environment variables or command line arguments.
+For example, to specify that it should run language detection you can use the `--run-language-detection` flag.
+It can also be configured using the `NORSKY_RUN_LANGUAGE_DETECTION` environment variable.
+
+For a full list of configuration options, run `norsky serve --help`.
+
+Simple example:
+
+```
+# Run language detection with a confidence threshold of 0.6
+norsky serve --run-language-detection=true --confidence-threshold=0.6
+
+# Specify as environment variable
+NORSKY_RUN_LANGUAGE_DETECTION=true NORSKY_CONFIDENCE_THRESHOLD=0.6 norsky serve
+```
+
+
+## Feed configuration
+
+Since version 1.0 the Norsky feed generator supports dynamically loading feeds from a `feeds.toml` file.
+Each feed is defined in a `[[feeds]]` section and currently requires the following fields:
+
+- `id` - The id of the feed.
+- `display_name` - The display name of the feed.
+- `description` - The description of the feed.
+- `avatar_path` - The path to the avatar image for the feed.
+- `languages` - The languages (iso-639-1 codes) supported by the feed.
+
+If you want to run a german language feed you can add the following to your `feeds.toml` file:
+
+```toml
+[[feeds]]
+id = "german"
+display_name = "German"
+description = "A feed of Bluesky posts written in German"
+avatar_path = "./assets/avatar.png"
+languages = ["de"]
+```
+
+In the future other fields will be added as optional fields to the feed definition.
+This will allow for filtering on other properties of Bluesky posts.
+
 
 ## Development
 

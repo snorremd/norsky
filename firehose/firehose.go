@@ -68,7 +68,7 @@ var feedPostPool = sync.Pool{
 }
 
 // Add this helper function at package level
-func HasEnoughNorwegianLetters(text string) bool {
+func HasEnoughLetters(text string) bool {
 	if len(text) == 0 {
 		return false
 	}
@@ -278,13 +278,15 @@ func ContainsSpamContent(text string) bool {
 	return false
 }
 
+// FirehoseConfig holds configuration for the firehose processing
+type FirehoseConfig struct {
+	RunLanguageDetection bool
+	ConfidenceThreshold  float64
+	Languages            []string
+}
+
 // Subscribe to the firehose using the Firehose struct as a receiver
-func Subscribe(ctx context.Context, postChan chan interface{}, ticker *time.Ticker, seq int64, detectFalseNegatives bool, confidenceThreshold float64) {
-	// Validate confidence threshold
-	if confidenceThreshold < 0 || confidenceThreshold > 1 {
-		log.Warnf("Invalid confidence threshold %f, using default 0.6", confidenceThreshold)
-		confidenceThreshold = 0.6
-	}
+func Subscribe(ctx context.Context, postChan chan interface{}, ticker *time.Ticker, seq int64, config FirehoseConfig) {
 
 	InitDetector()
 
@@ -374,7 +376,7 @@ func Subscribe(ctx context.Context, postChan chan interface{}, ticker *time.Tick
 					ThroughputBucketCount:    10,
 				},
 				conn.RemoteAddr().String(),
-				eventProcessor(postChan, ctx, ticker, detectFalseNegatives, confidenceThreshold).EventHandler)
+				eventProcessor(postChan, ctx, ticker, config).EventHandler)
 			err = events.HandleRepoStream(ctx, conn, scheduler, slog.Default())
 
 			// If error sleep
@@ -422,28 +424,48 @@ func MonitorFirehoseStats(ctx context.Context, statisticsChan chan models.Statis
 
 // Add new types to help organize the code
 type PostProcessor struct {
-	postChan             chan interface{}
-	context              context.Context
-	ticker               *time.Ticker
-	detectFalseNegatives bool
-	confidenceThreshold  float64
+	postChan           chan interface{}
+	context            context.Context
+	ticker             *time.Ticker
+	config             FirehoseConfig
+	targetLanguages    []lingua.Language
+	supportedLanguages map[lingua.Language]string
 }
 
-// Move language detection logic to its own function
-func (p *PostProcessor) DetectNorwegianLanguage(text string, currentLangs []string) (bool, []string) {
+// Rename to DetectLanguage since it's no longer Norwegian-specific
+func (p *PostProcessor) DetectLanguage(text string, currentLangs []string, targetLangs []lingua.Language) (bool, []string) {
 	detectedLang, exists := detector.DetectLanguageOf(text)
-	if !exists || detectedLang == lingua.English || (detectedLang != lingua.Bokmal && detectedLang != lingua.Nynorsk) {
+	if !exists || detectedLang == lingua.English {
 		return false, currentLangs
 	}
 
-	// Get confidence scores for norwegian languages between 0 and 1
-	bokmalConf := detector.ComputeLanguageConfidence(text, lingua.Bokmal)
-	nynorskConf := detector.ComputeLanguageConfidence(text, lingua.Nynorsk)
+	// Check if detected language is one of our target languages
+	isTargetLang := false
+	for _, lang := range targetLangs {
+		if detectedLang == lang {
+			isTargetLang = true
+			break
+		}
+	}
+	if !isTargetLang {
+		return false, currentLangs
+	}
 
-	log.Infof("Bokmal confidence: %.2f, Nynorsk confidence: %.2f (threshold: %.2f)",
-		bokmalConf, nynorskConf, p.confidenceThreshold)
+	// Get confidence scores for target languages
+	var highestConf float64
+	var detectedLingua lingua.Language
 
-	if bokmalConf < p.confidenceThreshold && nynorskConf < p.confidenceThreshold {
+	for _, lang := range targetLangs {
+		conf := detector.ComputeLanguageConfidence(text, lang)
+		if conf > highestConf {
+			highestConf = conf
+			detectedLingua = lang
+		}
+		log.Infof("%s confidence: %.2f (threshold: %.2f)",
+			lang.String(), conf, p.config.ConfidenceThreshold)
+	}
+
+	if highestConf < p.config.ConfidenceThreshold {
 		return false, currentLangs
 	}
 
@@ -451,14 +473,31 @@ func (p *PostProcessor) DetectNorwegianLanguage(text string, currentLangs []stri
 	updatedLangs := make([]string, len(currentLangs))
 	copy(updatedLangs, currentLangs)
 
-	// Add detected language if not present
-	if detectedLang == lingua.Bokmal && !lo.Contains(updatedLangs, "nb") {
-		updatedLangs = append(updatedLangs, "nb")
-	} else if detectedLang == lingua.Nynorsk && !lo.Contains(updatedLangs, "nn") {
-		updatedLangs = append(updatedLangs, "nn")
+	// Map lingua language to ISO code
+	langCode := linguaToISO(detectedLingua, p.supportedLanguages)
+	if langCode != "" && !lo.Contains(updatedLangs, langCode) {
+		updatedLangs = append(updatedLangs, langCode)
 	}
 
 	return true, updatedLangs
+}
+
+// Add helper function to map lingua languages to ISO codes
+func linguaToISO(lang lingua.Language, languages map[lingua.Language]string) string {
+	if code, ok := languages[lang]; ok {
+		return code
+	}
+	return ""
+}
+
+// Add helper function to map ISO codes to lingua languages
+func isoToLingua(code string, languages map[lingua.Language]string) (lingua.Language, bool) {
+	for lang, isoCode := range languages {
+		if isoCode == code {
+			return lang, true
+		}
+	}
+	return lingua.Unknown, false
 }
 
 // Handle post processing logic
@@ -472,14 +511,8 @@ func (p *PostProcessor) processPost(evt *atproto.SyncSubscribeRepos_Commit, op *
 		return nil
 	}
 
-	// 2. Filter out posts tagged with other languages (simple slice operation)
-	if len(record.Langs) > 0 && !lo.Some(record.Langs, []string{"no", "nb", "nn", "se", "en"}) {
-		log.Debugf("Skipping post with languages: %v", record.Langs)
-		return nil
-	}
-
 	// 3. Check letter ratio (fast character counting)
-	if !HasEnoughNorwegianLetters(record.Text) {
+	if !HasEnoughLetters(record.Text) {
 		log.Debugf("Skipping post with insufficient letter ratio: %s", uri)
 		return nil
 	}
@@ -500,10 +533,14 @@ func (p *PostProcessor) processPost(evt *atproto.SyncSubscribeRepos_Commit, op *
 	shouldProcess := false
 	langs := record.Langs
 
-	if p.detectFalseNegatives {
-		shouldProcess, langs = p.DetectNorwegianLanguage(record.Text, record.Langs)
-	} else if lo.Some(record.Langs, []string{"no", "nb", "nn", "se"}) {
-		shouldProcess, langs = p.DetectNorwegianLanguage(record.Text, record.Langs)
+	if p.config.RunLanguageDetection {
+		shouldProcess, langs = p.DetectLanguage(record.Text, record.Langs, p.targetLanguages)
+	} else {
+		// When not running language detection, check if:
+		// 1. Post has no language tags (accept all) OR
+		// 2. Post has language tags that match our target languages
+		targetCodes := p.getTargetIsoCodes()
+		shouldProcess = len(record.Langs) > 0 && lo.Some(record.Langs, targetCodes)
 	}
 
 	if !shouldProcess {
@@ -536,14 +573,47 @@ func (p *PostProcessor) processPost(evt *atproto.SyncSubscribeRepos_Commit, op *
 	return nil
 }
 
+// Helper method to get ISO codes from target languages
+func (p *PostProcessor) getTargetIsoCodes() []string {
+	codes := make([]string, 0, len(p.targetLanguages))
+	for _, lang := range p.targetLanguages {
+		if code := linguaToISO(lang, p.supportedLanguages); code != "" {
+			codes = append(codes, code)
+		}
+	}
+	return codes
+}
+
 // Main event processor function is now more focused
-func eventProcessor(postChan chan interface{}, context context.Context, ticker *time.Ticker, detectFalseNegatives bool, confidenceThreshold float64) *events.RepoStreamCallbacks {
+func eventProcessor(postChan chan interface{}, context context.Context, ticker *time.Ticker, config FirehoseConfig) *events.RepoStreamCallbacks {
+	var targetLangs []lingua.Language
+	supportedLangs := getSupportedLanguages()
+
+	if len(config.Languages) == 0 {
+		// If no languages specified, use all supported languages
+		targetLangs = make([]lingua.Language, 0, len(supportedLangs))
+		for lang := range supportedLangs {
+			targetLangs = append(targetLangs, lang)
+		}
+		log.Info("No specific languages configured, detecting all supported languages")
+	} else {
+		// Convert ISO codes to lingua languages
+		targetLangs = make([]lingua.Language, 0, len(config.Languages))
+		for _, code := range config.Languages {
+			if lang, ok := isoToLingua(code, supportedLangs); ok {
+				targetLangs = append(targetLangs, lang)
+			}
+		}
+		log.Infof("Detecting configured languages: %v", targetLangs)
+	}
+
 	processor := &PostProcessor{
-		postChan:             postChan,
-		context:              context,
-		ticker:               ticker,
-		detectFalseNegatives: detectFalseNegatives,
-		confidenceThreshold:  confidenceThreshold,
+		postChan:           postChan,
+		context:            context,
+		ticker:             ticker,
+		config:             config,
+		targetLanguages:    targetLangs,
+		supportedLanguages: supportedLangs,
 	}
 
 	return &events.RepoStreamCallbacks{
@@ -608,4 +678,17 @@ func eventProcessor(postChan chan interface{}, context context.Context, ticker *
 // GetDetector returns the package-level detector for testing
 func GetDetector() lingua.LanguageDetector {
 	return detector
+}
+
+// Rename and modify the function to just get supported languages
+func getSupportedLanguages() map[lingua.Language]string {
+	languages := make(map[lingua.Language]string)
+
+	// Map all lingua languages to their ISO 639-1 codes
+	for _, lang := range lingua.AllLanguages() {
+		isoCode := strings.ToLower(lang.IsoCode639_1().String())
+		languages[lang] = isoCode
+	}
+
+	return languages
 }

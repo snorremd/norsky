@@ -52,7 +52,7 @@ func TestHasEnoughNorwegianLetters(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := firehose.HasEnoughNorwegianLetters(tt.text)
+			result := firehose.HasEnoughLetters(tt.text)
 			assert.Equal(t, tt.expected, result)
 		})
 	}

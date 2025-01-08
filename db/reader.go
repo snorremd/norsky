@@ -2,6 +2,7 @@ package db
 
 import (
 	"database/sql"
+	"fmt"
 	"norsky/models"
 	"strconv"
 	"time"
@@ -24,42 +25,41 @@ func NewReader(database string) *Reader {
 	}
 }
 
-func (reader *Reader) GetFeed(lang string, limit int, postId int64) ([]models.FeedPost, error) {
-
-	// Return next limit posts after cursor, ordered by created_at and uri
-
+func (reader *Reader) GetFeed(langs []string, limit int, postId int64) ([]models.FeedPost, error) {
 	sb := sqlbuilder.NewSelectBuilder()
-	sb.Select("id", "uri").From("posts")
+	sb.Select("DISTINCT posts.id", "posts.uri").From("posts")
+
 	if postId != 0 {
-		sb.Where(
-			sb.LessThan("id", postId),
-		)
+		sb.Where(sb.LessThan("posts.id", postId))
 	}
-	if lang != "" {
-		sb.Where(sb.Equal("language", lang))
+
+	if len(langs) > 0 {
+		sb.Join("post_languages", "posts.id = post_languages.post_id")
+		// Build OR conditions for each language
+		conditions := make([]string, len(langs))
+		for i, lang := range langs {
+			conditions[i] = sb.Equal("post_languages.language", lang)
+		}
+		sb.Where(sb.Or(conditions...))
 	}
-	sb.Join("post_languages", "posts.id = post_languages.post_id")
-	sb.GroupBy("posts.id")
-	sb.Limit(limit).OrderBy("id").Desc()
+
+	sb.OrderBy("posts.id").Desc()
+	sb.Limit(limit)
 
 	sql, args := sb.BuildWithFlavor(sqlbuilder.Flavor(sqlbuilder.SQLite))
 
 	rows, err := reader.db.Query(sql, args...)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("query error: %w", err)
 	}
 	defer rows.Close()
 
-	// Scan rows, collapse languages into single post
 	var posts []models.FeedPost
-
 	for rows.Next() {
 		var post models.FeedPost
-		// Scan row and
 		if err := rows.Scan(&post.Id, &post.Uri); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("scan error: %w", err)
 		}
-
 		posts = append(posts, post)
 	}
 

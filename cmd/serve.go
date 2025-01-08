@@ -7,7 +7,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"norsky/config"
 	"norsky/db"
+	"norsky/feeds"
 	"norsky/firehose"
 	"norsky/models"
 	"norsky/server"
@@ -62,9 +64,9 @@ func serveCmd() *cli.Command {
 				Value:   3000,
 			},
 			&cli.BoolFlag{
-				Name:    "detect-false-negatives",
+				Name:    "run-language-detection",
 				Usage:   "Run language detection on all posts, even if they are not tagged with correct language",
-				EnvVars: []string{"NORSKY_DETECT_FALSE_NEGATIVES"},
+				EnvVars: []string{"NORSKY_RUN_LANGUAGE_DETECTION"},
 				Value:   false,
 			},
 			&cli.Float64Flag{
@@ -72,6 +74,13 @@ func serveCmd() *cli.Command {
 				Usage:   "Minimum confidence threshold for language detection",
 				EnvVars: []string{"NORSKY_CONFIDENCE_THRESHOLD"},
 				Value:   0.6,
+			},
+			&cli.StringFlag{
+				Name:    "config",
+				Aliases: []string{"c"},
+				Value:   "config/feeds.toml",
+				Usage:   "Path to feeds configuration file",
+				EnvVars: []string{"NORSKY_CONFIG"},
 			},
 		},
 
@@ -84,7 +93,7 @@ func serveCmd() *cli.Command {
 			host := ctx.String("host")
 			port := ctx.Int("port")
 			confidenceThreshold := ctx.Float64("confidence-threshold")
-			detectFalseNegatives := ctx.Bool("detect-false-negatives")
+			runLanguageDetection := ctx.Bool("run-language-detection")
 			// Check if any of the required flags are missing
 			if hostname == "" {
 				return errors.New("missing required flag: --hostname")
@@ -117,10 +126,55 @@ func serveCmd() *cli.Command {
 			}
 
 			// Setup the server and firehose
+			cfg, err := config.LoadConfig(ctx.String("config"))
+			if err != nil {
+				return fmt.Errorf("failed to load config: %w", err)
+			}
+
+			// Initialize feeds and pass to server
+			feedMap := feeds.InitializeFeeds(cfg)
+
+			// Get unique languages from all feeds
+			languages := make(map[string]struct{})
+			detectAllLanguages := false
+
+			// First pass to check if any feed wants all languages
+			for _, feed := range cfg.Feeds {
+				if len(feed.Languages) == 0 {
+					detectAllLanguages = true
+					break
+				}
+			}
+
+			// If no feed wants all languages, collect specified languages
+			if !detectAllLanguages {
+				for _, feed := range cfg.Feeds {
+					for _, lang := range feed.Languages {
+						languages[lang] = struct{}{}
+					}
+				}
+			}
+
+			// Convert to slice
+			targetLanguages := make([]string, 0)
+			if detectAllLanguages {
+				// If any feed wants all languages, we'll pass an empty slice
+				// which the firehose will interpret as "detect all languages"
+				log.Info("Detecting all languages due to feed with empty language specification")
+			} else {
+				targetLanguages = make([]string, 0, len(languages))
+				for lang := range languages {
+					targetLanguages = append(targetLanguages, lang)
+				}
+				log.Infof("Detecting specific languages: %v", targetLanguages)
+			}
+
+			// Create the server
 			app := server.Server(&server.ServerConfig{
 				Hostname:    hostname,
 				Reader:      dbReader,
 				Broadcaster: broadcaster,
+				Feeds:       feedMap,
 			})
 
 			// Some glue code to pass posts from the firehose to the database and/or broadcaster
@@ -165,7 +219,11 @@ func serveCmd() *cli.Command {
 					}
 				}()
 				fmt.Println("Subscribing to firehose...")
-				firehose.Subscribe(firehoseCtx, postChan, livenessTicker, seq, detectFalseNegatives, confidenceThreshold)
+				firehose.Subscribe(firehoseCtx, postChan, livenessTicker, seq, firehose.FirehoseConfig{
+					RunLanguageDetection: runLanguageDetection,
+					ConfidenceThreshold:  confidenceThreshold,
+					Languages:            targetLanguages,
+				})
 			}()
 
 			go func() {
@@ -213,7 +271,11 @@ func serveCmd() *cli.Command {
 							firehoseCtx = context.WithValue(firehoseCtx, cancelKey, cancel)
 
 							// Restart subscription in new goroutine
-							go firehose.Subscribe(firehoseCtx, postChan, livenessTicker, seq, ctx.Bool("detect-false-negatives"), ctx.Float64("confidence-threshold"))
+							go firehose.Subscribe(firehoseCtx, postChan, livenessTicker, seq, firehose.FirehoseConfig{
+								RunLanguageDetection: ctx.Bool("run-language-detection"),
+								ConfidenceThreshold:  ctx.Float64("confidence-threshold"),
+								Languages:            targetLanguages,
+							})
 						}
 					}
 				}

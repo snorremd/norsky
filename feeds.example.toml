@@ -1,0 +1,27 @@
+[[feeds]]
+id = "english"
+display_name = "English"
+description = "A feed of Bluesky posts written in English"
+avatar_path = "./assets/avatar.png"
+languages = ["en", "en-US", "en-GB", "en-AU", "en-CA", "en-NZ", "en-ZA"]
+
+[[feeds]]
+id = "nynorsk"
+display_name = "Nynorsk"
+description = "A feed of Bluesky posts written in Norwegian nynorsk"
+avatar_path = "./assets/avatar.png"
+languages = ["nn"]
+
+[[feeds]]
+id = "sami"
+display_name = "Sami"
+description = "A feed of Bluesky posts written in Sami"
+avatar_path = "./assets/avatar.png"
+languages = ["se"]
+
+[[feeds]]
+id = "all"
+display_name = "Norsk (Norwegian)"
+description = "A feed of Bluesky posts written in Norwegian bokmål, nynorsk and sami"
+avatar_path = "./assets/avatar.png"
+languages = ["nb", "nn", "no", "se"]

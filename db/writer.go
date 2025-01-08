@@ -68,7 +68,8 @@ func processSeq(db *sql.DB, evt models.ProcessSeqEvent) error {
 
 func createPost(db *sql.DB, post models.Post) error {
 	log.WithFields(log.Fields{
-		"uri": post.Uri,
+		"uri":       post.Uri,
+		"languages": post.Languages,
 	}).Info("Creating post")
 	// Post insert query
 	insertPost := sqlbuilder.NewInsertBuilder()

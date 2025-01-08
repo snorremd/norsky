@@ -11,6 +11,8 @@ import (
 	"os"
 	"time"
 
+	"norsky/config"
+
 	log "github.com/sirupsen/logrus"
 	"github.com/urfave/cli/v2"
 )
@@ -49,6 +51,47 @@ Prints all other log messages to stderr.`,
 			// Disable logging to stdout
 			log.SetOutput(os.Stderr)
 
+			// Load feed configuration
+			cfg, err := config.LoadConfig("feeds.toml")
+			if err != nil {
+				return fmt.Errorf("failed to load config: %w", err)
+			}
+
+			// Get unique languages from all feeds
+			languages := make(map[string]struct{})
+			detectAllLanguages := false
+
+			// First pass to check if any feed wants all languages
+			for _, feed := range cfg.Feeds {
+				if len(feed.Languages) == 0 {
+					detectAllLanguages = true
+					break
+				}
+			}
+
+			// If no feed wants all languages, collect specified languages
+			if !detectAllLanguages {
+				for _, feed := range cfg.Feeds {
+					for _, lang := range feed.Languages {
+						languages[lang] = struct{}{}
+					}
+				}
+			}
+
+			// Convert to slice
+			targetLanguages := make([]string, 0)
+			if detectAllLanguages {
+				// If any feed wants all languages, we'll pass an empty slice
+				// which the firehose will interpret as "detect all languages"
+				log.Info("Detecting all languages due to feed with empty language specification")
+			} else {
+				targetLanguages = make([]string, 0, len(languages))
+				for lang := range languages {
+					targetLanguages = append(targetLanguages, lang)
+				}
+				log.Infof("Detecting specific languages: %v", targetLanguages)
+			}
+
 			// Channel for subscribing to bluesky posts
 			postChan := make(chan interface{})
 
@@ -61,8 +104,11 @@ Prints all other log messages to stderr.`,
 					postChan,
 					ticker,
 					-1,
-					ctx.Bool("detect-false-negatives"),
-					ctx.Float64("confidence-threshold"),
+					firehose.FirehoseConfig{
+						RunLanguageDetection: ctx.Bool("run-language-detection"),
+						ConfidenceThreshold:  ctx.Float64("confidence-threshold"),
+						Languages:            targetLanguages,
+					},
 				)
 			}()
 
