@@ -16,6 +16,8 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"log/slog"
+
 	"github.com/bluesky-social/indigo/api/atproto"
 	appbsky "github.com/bluesky-social/indigo/api/bsky"
 	"github.com/bluesky-social/indigo/events"
@@ -373,7 +375,7 @@ func Subscribe(ctx context.Context, postChan chan interface{}, ticker *time.Tick
 				},
 				conn.RemoteAddr().String(),
 				eventProcessor(postChan, ctx, ticker, detectFalseNegatives, confidenceThreshold).EventHandler)
-			err = events.HandleRepoStream(ctx, conn, scheduler)
+			err = events.HandleRepoStream(ctx, conn, scheduler, slog.Default())
 
 			// If error sleep
 			if err != nil {

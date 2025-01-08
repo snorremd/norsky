@@ -6,17 +6,17 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"norsky/bluesky"
 	"norsky/feeds"
 	"os"
 	"time"
 
 	"github.com/bluesky-social/indigo/api/bsky"
+	"github.com/bluesky-social/indigo/util"
 	"github.com/cqroot/prompt"
 	"github.com/cqroot/prompt/input"
-	"github.com/labstack/gommon/log"
+	"github.com/samber/lo"
 	"github.com/urfave/cli/v2"
-
-	"github.com/strideynet/bsky-furry-feed/bluesky"
 )
 
 // publishCmd represents the publish command
@@ -69,28 +69,47 @@ Registers the feed with your preferred name, description, etc.`,
 			if err != nil {
 				return fmt.Errorf("could not open avatar file: %w", err)
 			}
+			defer f.Close()
 
 			blob, err := client.UploadBlob(ctx.Context, f)
 			if err != nil {
 				return fmt.Errorf("could not upload avatar blob: %w", err)
 			}
 
+			actorFeeds, err := client.GetActorFeeds(ctx.Context, handle)
+			if err != nil {
+				return fmt.Errorf("could not get actor feeds: %w", err)
+			}
+
 			for _, feed := range feeds.Feeds {
-				log.Infof("Publishing feed %s", feed.DisplayName)
-				err := client.PutRecord(ctx.Context, "app.bsky.feed.generator", feed.Id, &bsky.FeedGenerator{
+
+				existingFeed, ok := lo.Find(actorFeeds.Feeds, func(f *bsky.FeedDefs_GeneratorView) bool {
+					parsed, err := util.ParseAtUri(f.Uri)
+					if err != nil {
+						return false
+					}
+					return parsed.Rkey == feed.Id
+				})
+
+				var cid *string
+
+				if ok && existingFeed != nil {
+					cid = &existingFeed.Cid
+				}
+
+				err := client.PutFeedGenerator(ctx.Context, feed.Id, &bsky.FeedGenerator{
 					Avatar:      blob,
 					Did:         fmt.Sprintf("did:web:%s", hostname),
 					CreatedAt:   bluesky.FormatTime(time.Now().UTC()),
 					DisplayName: feed.DisplayName,
 					Description: &feed.Description,
-				})
+				}, cid)
 
 				if err != nil {
 					return fmt.Errorf("could not publish feed: %w", err)
 				}
+				fmt.Println("Published feed...", feed.DisplayName)
 			}
-
-			fmt.Println("Publishing feed...", f)
 
 			return nil
 
@@ -128,7 +147,7 @@ A Bluesky user account is required to unpublish feeds on Bluesky.`,
 
 			fmt.Println("Unpublishing feeds...")
 
-			return client.PurgeFeeds(ctx.Context)
+			return client.DeleteAllFeeds(ctx.Context)
 
 		},
 	}
