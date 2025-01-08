@@ -24,7 +24,7 @@ func NewReader(database string) *Reader {
 	}
 }
 
-func (reader *Reader) GetFeed(lang string, limit int, postId int64) ([]models.FeedPost, error) {
+func (reader *Reader) GetFeed(langs []string, limit int, postId int64) ([]models.FeedPost, error) {
 
 	// Return next limit posts after cursor, ordered by created_at and uri
 
@@ -35,11 +35,11 @@ func (reader *Reader) GetFeed(lang string, limit int, postId int64) ([]models.Fe
 			sb.LessThan("id", postId),
 		)
 	}
-	if lang != "" {
-		sb.Where(sb.Equal("language", lang))
+	if len(langs) > 0 {
+		sb.Join("post_languages", "posts.id = post_languages.post_id")
+		sb.Where(sb.In("language", langs))
+		sb.GroupBy("posts.id")
 	}
-	sb.Join("post_languages", "posts.id = post_languages.post_id")
-	sb.GroupBy("posts.id")
 	sb.Limit(limit).OrderBy("id").Desc()
 
 	sql, args := sb.BuildWithFlavor(sqlbuilder.Flavor(sqlbuilder.SQLite))

@@ -5,32 +5,18 @@ import (
 	"norsky/models"
 	"strconv"
 
+	"norsky/config"
+
 	log "github.com/sirupsen/logrus"
 )
 
 type Algorithm func(reader *db.Reader, cursor string, limit int) (*models.FeedResponse, error)
 
-func bokmaal(reader *db.Reader, cursor string, limit int) (*models.FeedResponse, error) {
-	return genericAlgo(reader, cursor, limit, "nb")
-}
-
-func nynorsk(reader *db.Reader, cursor string, limit int) (*models.FeedResponse, error) {
-	return genericAlgo(reader, cursor, limit, "nn")
-}
-
-func samisk(reader *db.Reader, cursor string, limit int) (*models.FeedResponse, error) {
-	return genericAlgo(reader, cursor, limit, "se")
-}
-
-func all(reader *db.Reader, cursor string, limit int) (*models.FeedResponse, error) {
-	return genericAlgo(reader, cursor, limit, "")
-}
-
 // Reuse genericAlgo for all algorithms
-func genericAlgo(reader *db.Reader, cursor string, limit int, lang string) (*models.FeedResponse, error) {
+func genericAlgo(reader *db.Reader, cursor string, limit int, languages []string) (*models.FeedResponse, error) {
 	postId := safeParseCursor(cursor)
 
-	posts, err := reader.GetFeed(lang, limit+1, postId)
+	posts, err := reader.GetFeed(languages, limit+1, postId)
 	if err != nil {
 		log.Error("Error getting feed", err)
 		return nil, err
@@ -69,33 +55,32 @@ type Feed struct {
 	Id          string
 	DisplayName string
 	Description string
+	AvatarPath  string
+	Languages   []string
 	Algorithm   Algorithm
 }
 
-// List of available feeds
-var Feeds = map[string]Feed{
-	"bokmaal": {
-		Id:          "bokmaal",
-		DisplayName: "Bokmål",
-		Description: "A feed of Bluesky posts written in Norwegian bokmål",
-		Algorithm:   bokmaal,
-	},
-	"nynorsk": {
-		Id:          "nynorsk",
-		DisplayName: "Nynorsk",
-		Description: "A feed of Bluesky posts written in Norwegian nynorsk",
-		Algorithm:   nynorsk,
-	},
-	"sami": {
-		Id:          "sami",
-		DisplayName: "Sami",
-		Description: "A feed of Bluesky posts written in Sami",
-		Algorithm:   samisk,
-	},
-	"all": {
-		Id:          "all",
-		DisplayName: "Norsk (Norwegian)",
-		Description: "A feed of Bluesky posts written in Norwegian bokmål, nynorsk and sami",
-		Algorithm:   all,
-	},
+// Create a new function to initialize feeds from config
+func InitializeFeeds(cfg *config.Config) map[string]Feed {
+	feeds := make(map[string]Feed)
+
+	for _, feedCfg := range cfg.Feeds {
+		feeds[feedCfg.ID] = Feed{
+			Id:          feedCfg.ID,
+			DisplayName: feedCfg.DisplayName,
+			Description: feedCfg.Description,
+			AvatarPath:  feedCfg.AvatarPath,
+			Languages:   feedCfg.Languages,
+			Algorithm:   createAlgorithm(feedCfg.Languages),
+		}
+	}
+
+	return feeds
+}
+
+// Helper function to create an algorithm based on languages
+func createAlgorithm(languages []string) Algorithm {
+	return func(reader *db.Reader, cursor string, limit int) (*models.FeedResponse, error) {
+		return genericAlgo(reader, cursor, limit, languages)
+	}
 }

@@ -40,6 +40,9 @@ type ServerConfig struct {
 
 	// Broadcast channels to pass posts to SSE clients
 	Broadcaster *Broadcaster
+
+	// Add feeds to config
+	Feeds map[string]feeds.Feed
 }
 
 // Make it sync
@@ -215,16 +218,13 @@ func Server(config *ServerConfig) *fiber.App {
 
 	// Endpoint to describe the feed
 	app.Get("/xrpc/app.bsky.feed.describeFeedGenerator", func(c *fiber.Ctx) error {
-
-		// Map over algorithms.Algorithms keys and return a bsky.FeedDescribeFeedGenerator_Output
 		generatorFeeds := []*bsky.FeedDescribeFeedGenerator_Feed{}
-		for algorithm := range feeds.Feeds {
+		for feedId := range config.Feeds {
 			generatorFeeds = append(generatorFeeds, &bsky.FeedDescribeFeedGenerator_Feed{
-				Uri: "at://did:web:" + config.Hostname + "/app.bsky.feed.generator/" + algorithm,
+				Uri: "at://did:web:" + config.Hostname + "/app.bsky.feed.generator/" + feedId,
 			})
 		}
 
-		// Return the list of feeds
 		return c.JSON(bsky.FeedDescribeFeedGenerator_Output{
 			Did:   "did:web:" + config.Hostname,
 			Feeds: generatorFeeds,
@@ -255,8 +255,7 @@ func Server(config *ServerConfig) *fiber.App {
 			"limit":  limit,
 		}).Info("Generate feed skeleton with parameters")
 
-		if feed, ok := feeds.Feeds[feedName]; ok {
-			// Call the algorithm
+		if feed, ok := config.Feeds[feedName]; ok {
 			posts, err := feed.Algorithm(config.Reader, cursor, int(limit))
 			if err != nil {
 				fmt.Println("Error calling algorithm", err)

@@ -5,6 +5,7 @@ go 1.23.0
 toolchain go1.23.3
 
 require (
+	github.com/BurntSushi/toml v1.4.0
 	github.com/bluesky-social/indigo v0.0.0-20241223053147-c130614850e5
 	github.com/cenkalti/backoff/v4 v4.3.0
 	github.com/cqroot/prompt v0.9.4

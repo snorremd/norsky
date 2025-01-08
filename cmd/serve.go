@@ -7,7 +7,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"norsky/config"
 	"norsky/db"
+	"norsky/feeds"
 	"norsky/firehose"
 	"norsky/models"
 	"norsky/server"
@@ -73,6 +75,13 @@ func serveCmd() *cli.Command {
 				EnvVars: []string{"NORSKY_CONFIDENCE_THRESHOLD"},
 				Value:   0.6,
 			},
+			&cli.StringFlag{
+				Name:    "config",
+				Aliases: []string{"c"},
+				Value:   "config/feeds.toml",
+				Usage:   "Path to feeds configuration file",
+				EnvVars: []string{"NORSKY_CONFIG"},
+			},
 		},
 
 		Action: func(ctx *cli.Context) error {
@@ -117,10 +126,20 @@ func serveCmd() *cli.Command {
 			}
 
 			// Setup the server and firehose
+			cfg, err := config.LoadConfig(ctx.String("config"))
+			if err != nil {
+				return fmt.Errorf("failed to load config: %w", err)
+			}
+
+			// Initialize feeds and pass to server
+			feedMap := feeds.InitializeFeeds(cfg)
+
+			// Create the server
 			app := server.Server(&server.ServerConfig{
 				Hostname:    hostname,
 				Reader:      dbReader,
 				Broadcaster: broadcaster,
+				Feeds:       feedMap,
 			})
 
 			// Some glue code to pass posts from the firehose to the database and/or broadcaster
