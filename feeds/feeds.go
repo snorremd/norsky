@@ -13,10 +13,10 @@ import (
 type Algorithm func(reader *db.Reader, cursor string, limit int) (*models.FeedResponse, error)
 
 // Reuse genericAlgo for all algorithms
-func genericAlgo(reader *db.Reader, cursor string, limit int, languages []string) (*models.FeedResponse, error) {
+func genericAlgo(reader *db.Reader, cursor string, limit int, languages []string, keywords []string) (*models.FeedResponse, error) {
 	postId := safeParseCursor(cursor)
 
-	posts, err := reader.GetFeed(languages, limit+1, postId)
+	posts, err := reader.GetFeed(languages, keywords, limit+1, postId)
 	if err != nil {
 		log.Error("Error getting feed", err)
 		return nil, err
@@ -57,6 +57,7 @@ type Feed struct {
 	Description string
 	AvatarPath  string
 	Languages   []string
+	Keywords    []string
 	Algorithm   Algorithm
 }
 
@@ -71,7 +72,8 @@ func InitializeFeeds(cfg *config.Config) map[string]Feed {
 			Description: feedCfg.Description,
 			AvatarPath:  feedCfg.AvatarPath,
 			Languages:   feedCfg.Languages,
-			Algorithm:   createAlgorithm(feedCfg.Languages),
+			Keywords:    feedCfg.Keywords,
+			Algorithm:   createAlgorithm(feedCfg.Languages, feedCfg.Keywords),
 		}
 	}
 
@@ -79,8 +81,8 @@ func InitializeFeeds(cfg *config.Config) map[string]Feed {
 }
 
 // Helper function to create an algorithm based on languages
-func createAlgorithm(languages []string) Algorithm {
+func createAlgorithm(languages []string, keywords []string) Algorithm {
 	return func(reader *db.Reader, cursor string, limit int) (*models.FeedResponse, error) {
-		return genericAlgo(reader, cursor, limit, languages)
+		return genericAlgo(reader, cursor, limit, languages, keywords)
 	}
 }

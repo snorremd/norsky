@@ -13,6 +13,7 @@ type FeedConfig struct {
 	Description string   `toml:"description"`
 	AvatarPath  string   `toml:"avatar_path,omitempty"`
 	Languages   []string `toml:"languages"`
+	Keywords    []string `toml:"keywords,omitempty"`
 }
 
 type Config struct {
