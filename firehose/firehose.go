@@ -35,9 +35,8 @@ import (
 // Some constants to optimize the firehose
 
 const (
-	wsReadBufferSize  = 1024 * 16 // 16KB
-	wsWriteBufferSize = 1024 * 16 // 16KB
-	eventBufferSize   = 10000     // Increase from 1000
+	wsReadBufferSize  = 1024 * 64 // 64KB
+	wsWriteBufferSize = 1024 * 64 // 64KB
 )
 
 // We use all languages so as to reliably separate Norwegian from other European languages
@@ -175,7 +174,6 @@ func ContainsRepetitivePattern(text string) bool {
 						minRepeats = 2
 					}
 					if repeats >= minRepeats {
-						log.Debugf("Found repeating pattern '%v' (%d times)", pattern, repeats)
 						return true
 					}
 				} else {
@@ -247,19 +245,16 @@ func ContainsSpamContent(text string) bool {
 
 	// If more than 5 hashtags, consider it spam
 	if hashtagCount > 5 {
-		log.Infof("Skipping spam post with many hashtags: %s", text)
 		return true
 	}
 
 	// If more than 5 mentions, consider it spam
 	if mentionCount > 5 {
-		log.Infof("Skipping spam post with many mentions: %s", text)
 		return true
 	}
 
 	// Check for repeated hashtags or mentions (common spam pattern)
 	if strings.Count(text, "##") > 0 || strings.Count(text, "@@") > 0 {
-		log.Infof("Skipping spam post with repeated hashtags/mentions: %s", text)
 		return true
 	}
 
@@ -270,7 +265,6 @@ func ContainsSpamContent(text string) bool {
 		symbolRatio := float64(hashtagCount+mentionCount) / float64(len(words))
 		// If more than 50% of words are hashtags or mentions combined, consider it spam
 		if symbolRatio > 0.5 {
-			log.Infof("Skipping spam post with high hashtag/mention ratio: %s", text)
 			return true
 		}
 	}
@@ -369,11 +363,11 @@ func Subscribe(ctx context.Context, postChan chan interface{}, ticker *time.Tick
 
 			scheduler := autoscaling.NewScheduler(
 				autoscaling.AutoscaleSettings{
-					MaxConcurrency:           runtime.NumCPU(),
-					Concurrency:              2,
-					AutoscaleFrequency:       5 * time.Second,
-					ThroughputBucketDuration: 1 * time.Second,
-					ThroughputBucketCount:    10,
+					MaxConcurrency:           runtime.NumCPU() * 2,
+					Concurrency:              runtime.NumCPU() * 2,
+					AutoscaleFrequency:       10 * time.Second,
+					ThroughputBucketDuration: 2 * time.Second,
+					ThroughputBucketCount:    15,
 				},
 				conn.RemoteAddr().String(),
 				eventProcessor(postChan, ctx, ticker, config).EventHandler)
@@ -504,28 +498,21 @@ func isoToLingua(code string, languages map[lingua.Language]string) (lingua.Lang
 func (p *PostProcessor) processPost(evt *atproto.SyncSubscribeRepos_Commit, op *atproto.SyncSubscribeRepos_RepoOp, record *appbsky.FeedPost) error {
 	uri := fmt.Sprintf("at://%s/%s", evt.Repo, op.Path)
 
-	// 1. Check word count first (cheapest operation - just string splitting)
+	// Remove debug logs for filtering steps
 	words := strings.Fields(record.Text)
 	if len(words) < 4 {
-		log.Debugf("Skipping short post with only %d words: %s", len(words), uri)
 		return nil
 	}
 
-	// 3. Check letter ratio (fast character counting)
 	if !HasEnoughLetters(record.Text) {
-		log.Debugf("Skipping post with insufficient letter ratio: %s", uri)
 		return nil
 	}
 
-	// 4. Check for repetitive patterns (string analysis)
 	if ContainsRepetitivePattern(record.Text) {
-		log.Debugf("Skipping post with repetitive pattern: %s", uri)
 		return nil
 	}
 
-	// 5. Check for spam content (string matching)
 	if ContainsSpamContent(record.Text) {
-		log.Debugf("Skipping spam post: %s", uri)
 		return nil
 	}
 
