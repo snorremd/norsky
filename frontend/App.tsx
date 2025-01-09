@@ -258,73 +258,6 @@ const langToName = (lang: string): string => {
   }
 };
 
-interface PostFirehoseProps {
-  post: Accessor<Post | undefined>;
-  className?: string;
-}
-
-const PostFirehose: Component<PostFirehoseProps> = ({ post, className }) => {
-
-  // Match regex to get the profile and post id
-  // URI example: at://did:plc:opkjeuzx2lego6a7gueytryu/app.bsky.feed.post/3kcbxsslpu623
-  // profile = did:plc:opkjeuzx2lego6a7gueytryu
-  // post = 3kcbxsslpu623
-
-  const bskyLink = (post: Post) => {
-    const regex = /at:\/\/(did:plc:[a-z0-9]+)\/app.bsky.feed.post\/([a-z0-9]+)/;
-    const [profile, postId] = regex.exec(post.uri)!.slice(1);
-    return `https://bsky.app/profile/${profile}/post/${postId}`;
-  } 
-
-  return (
-    <StatWrapper className={`row-span-2 ${className}`}>
-      <h1 class="text-2xl text-zinc-300 text-center pb-4">Recent posts</h1>
-      <div class="max-h-full gap-4 flex flex-col ">
-        {post() ? (
-        <div class="flex flex-col gap-4 p-4 bg-zinc-900 rounded-md">
-          <div class="flex flex-row justify-between">
-            <p class="text-zinc-400">{formatRelative(new Date(post().createdAt * 1000), new Date()) }</p>
-            <p class="text-zinc-400">
-              {post().languages.map(langToName).join(", ")}
-            </p>
-          </div>
-          <p class="text-zinc-300 w-full max-w-[80ch]">{post().text}</p>
-
-          {/* Link to post on Bluesky */}
-          <div class="flex flex-row justify-end">
-            <a
-              class="text-sky-300 hover:text-sky-200 underline"
-              href={bskyLink(post())}
-              target="_blank"
-            >
-              View on Bsky
-            </a>
-          </div>
-        </div>
-        ): null}
-      </div>
-    </StatWrapper>
-  );
-};
-
-const StatisticStat = ({
-  label,
-  value,
-  className,
-}: {
-  label: string;
-  value: Accessor<number>;
-  className?: string;
-}) => {
-  return (
-    <StatWrapper className={`row-span-1 justify-between ${className}`}>
-      <h2 class="text-zinc-300 text-xl text-start">{label}</h2>
-      <p class="text-sky-300 text-8xl text-center">{value()}</p>
-      <p class="text-stone-400 text-sm text-end">per second</p>
-    </StatWrapper>
-  );
-};
-
 const Header = () => {
   return (
     <header
@@ -349,8 +282,6 @@ const Header = () => {
 const App: Component = () => {
   const [key, setKey] = createSignal<string>(); // Used to politely close the event source
   const [post, setPost] = createSignal<Post>();
-  const [eventsPerSecond, setEventsPerSecond] = createSignal<number>(0);
-  const [postsPerSecond, setPostsPerSecond] = createSignal<number>(0);
   const [eventSource, setEventSource] = createSignal<EventSource | null>(null);
 
   onMount(() => {
@@ -368,13 +299,6 @@ const App: Component = () => {
         const data = JSON.parse(e.data);
         console.log("Received post", data);
         setPost(data);
-      });
-
-      es.addEventListener("statistics", (e: MessageEvent) => {
-        const data = JSON.parse(e.data);
-        console.log("Received statistics", data);
-        setEventsPerSecond(data.eventsPerSecond);
-        setPostsPerSecond(data.postsPerSecond);
       });
 
       // Add error handling
@@ -412,21 +336,10 @@ const App: Component = () => {
     <>
       <Header />
       <div class="p-8 min-h-full grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-8 w-full">
-        <StatisticStat
-          className="order-1"
-          label="Records"
-          value={eventsPerSecond}
-        />
-        <StatisticStat
-          className="order-2 2xl:order-5"
-          label="Posts"
-          value={postsPerSecond}
-        />
         <PostPerTime className="order-3" lang="" label="All languages" />
         <PostPerTime className="order-4" lang="nb" label="Norwegian bokmål" />
         <PostPerTime className="order-5" lang="nn" label="Norwegian nynorsk" />
         <PostPerTime className="order-6" lang="se" label="Northern Sami" />
-        <PostFirehose className="order-7" post={post} />
       </div>
     </>
   );
