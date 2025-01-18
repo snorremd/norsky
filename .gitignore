@@ -2,6 +2,7 @@
 dist/
 tmp/
 feed.db
+feed.db-*
 node_modules
 server/dist
 queries/

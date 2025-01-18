@@ -16,11 +16,31 @@ type Reader struct {
 }
 
 func NewReader(database string) *Reader {
-	// Open in read-only mode
-	db, err := sql.Open("sqlite", database+"?mode=ro")
+	// Open in read-only mode with optimized settings
+	db, err := sql.Open("sqlite", fmt.Sprintf("%s?mode=ro&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)", database))
 	if err != nil {
 		panic("failed to connect database")
 	}
+
+	// Set connection pool settings for reader
+	db.SetMaxOpenConns(4)            // Allow multiple concurrent readers
+	db.SetMaxIdleConns(2)            // Keep some connections ready
+	db.SetConnMaxLifetime(time.Hour) // Recreate connections after an hour
+	db.SetConnMaxIdleTime(time.Hour) // Close idle connections after an hour
+
+	// Configure additional pragmas for better read performance
+	if _, err := db.Exec(`
+		PRAGMA busy_timeout = 5000;
+		PRAGMA synchronous = NORMAL;
+		PRAGMA cache_size = -32000; -- 32MB cache
+		PRAGMA temp_store = MEMORY;
+		PRAGMA mmap_size = 268435456; -- 256MB memory mapped I/O
+		PRAGMA page_size = 4096;      -- Optimal page size for most systems
+		PRAGMA read_uncommitted = 1;   -- Allow dirty reads for better concurrency
+	`); err != nil {
+		panic(fmt.Sprintf("failed to set pragmas: %v", err))
+	}
+
 	return &Reader{
 		db: db,
 	}

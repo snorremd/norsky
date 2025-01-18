@@ -42,7 +42,7 @@ func Subscribe(ctx context.Context, database string, postChan chan interface{}) 
 			case models.ProcessSeqEvent:
 				processSeq(db, event)
 			case models.CreatePostEvent:
-				createPost(db, event.Post)
+				createPost(ctx, db, event.Post)
 			case models.DeletePostEvent:
 				deletePost(db, event.Post)
 			default:
@@ -54,20 +54,47 @@ func Subscribe(ctx context.Context, database string, postChan chan interface{}) 
 }
 
 func processSeq(db *sql.DB, evt models.ProcessSeqEvent) error {
+	// Add context with timeout and retry logic for sequence updates
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
 	// Update sequence row with new seq number
 	updateSeq := sqlbuilder.NewUpdateBuilder()
 	sql, args := updateSeq.Update("sequence").Set(updateSeq.Assign("seq", evt.Seq)).Where(updateSeq.Equal("id", 0)).Build()
 
-	_, err := db.Exec(sql, args...)
-	if err != nil {
-		log.Error("Error updating sequence", err)
-		return err
+	// Add retry logic with exponential backoff
+	var err error
+	for retries := 0; retries < 3; retries++ {
+		_, err = db.ExecContext(ctx, sql, args...)
+		if err == nil {
+			return nil
+		}
+
+		// If database is locked, wait and retry
+		if err.Error() == "database is locked" {
+			time.Sleep(time.Duration(retries+1) * 100 * time.Millisecond)
+			continue
+		}
+
+		// For other errors, return immediately
+		return fmt.Errorf("error updating sequence: %w", err)
 	}
 
-	return nil
+	return fmt.Errorf("error updating sequence after retries: %w", err)
 }
 
-func createPost(db *sql.DB, post models.Post) (int64, error) {
+func createPost(ctx context.Context, db *sql.DB, post models.Post) (int64, error) {
+	// Add timeout for the entire operation
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	// Start transaction with context
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("transaction error: %w", err)
+	}
+	defer tx.Rollback()
+
 	log.WithFields(log.Fields{
 		"uri":        post.Uri,
 		"languages":  post.Languages,
@@ -75,13 +102,6 @@ func createPost(db *sql.DB, post models.Post) (int64, error) {
 		// Record lag from when the post was created to when it was processed
 		"lagSeconds": time.Since(time.Unix(post.CreatedAt, 0)).Seconds(),
 	}).Info("Creating post")
-
-	// Start a transaction since we need to insert into multiple tables
-	tx, err := db.Begin()
-	if err != nil {
-		return 0, fmt.Errorf("transaction error: %w", err)
-	}
-	defer tx.Rollback()
 
 	// Post insert query
 	insertPost := sqlbuilder.NewInsertBuilder()
