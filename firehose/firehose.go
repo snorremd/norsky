@@ -440,11 +440,19 @@ type PostProcessor struct {
 
 // Rename to DetectLanguage since it's no longer Norwegian-specific
 func (p *PostProcessor) DetectLanguage(text string, currentLangs []string, targetLangs []lingua.Language) (bool, []string) {
+	// First check English confidence separately
+	englishConf := p.languageDetector.ComputeLanguageConfidence(text, lingua.English)
+
+	// If text is primarily English (high confidence), skip it unless English is a target language
+	if englishConf > 0.8 && !lo.Contains(targetLangs, lingua.English) {
+		return false, currentLangs
+	}
+
 	var highestConf float64
 	var detectedLang lingua.Language
 
-	// Check confidence for English and all target languages
-	for _, lang := range append([]lingua.Language{lingua.English}, targetLangs...) {
+	// Only check target languages
+	for _, lang := range targetLangs {
 		conf := p.languageDetector.ComputeLanguageConfidence(text, lang)
 		if conf > highestConf {
 			highestConf = conf
@@ -452,8 +460,8 @@ func (p *PostProcessor) DetectLanguage(text string, currentLangs []string, targe
 		}
 	}
 
-	// If confidence is too low or detected language is English, skip
-	if highestConf < p.config.ConfidenceThreshold || detectedLang == lingua.English {
+	// If confidence is too low, skip
+	if highestConf < p.config.ConfidenceThreshold {
 		return false, currentLangs
 	}
 
