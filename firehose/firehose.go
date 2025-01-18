@@ -8,52 +8,70 @@ import (
 	"io"
 	"net/http"
 	"norsky/models"
-	"runtime"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 	"unicode"
 	"unicode/utf8"
 
 	"log/slog"
 
+	"net"
+
 	"github.com/bluesky-social/indigo/api/atproto"
 	appbsky "github.com/bluesky-social/indigo/api/bsky"
 	"github.com/bluesky-social/indigo/events"
-	"github.com/bluesky-social/indigo/events/schedulers/autoscaling"
+	"github.com/bluesky-social/indigo/events/schedulers/sequential"
 	lexutil "github.com/bluesky-social/indigo/lex/util"
 	"github.com/bluesky-social/indigo/repo"
 	"github.com/bluesky-social/indigo/repomgr"
 	"github.com/cenkalti/backoff/v4"
 	"github.com/gorilla/websocket"
 	lingua "github.com/pemistahl/lingua-go"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
 	log "github.com/sirupsen/logrus"
 )
 
 // Some constants to optimize the firehose
 
+// Allow these to grow to 10MB
 const (
-	wsReadBufferSize  = 1024 * 16 // 16KB
-	wsWriteBufferSize = 1024 * 16 // 16KB
-	eventBufferSize   = 10000     // Increase from 1000
+	wsReadBufferSize  = 1024 * 1024 * 2  // 2MB
+	wsWriteBufferSize = 1024 * 1024 * 2  // 2MB
+	wsReadTimeout     = 90 * time.Second // Increased from 60s
+	wsWriteTimeout    = 15 * time.Second // Increased from 10s
+	wsPingInterval    = 30 * time.Second // Reduced from 60s
 )
 
-// We use all languages so as to reliably separate Norwegian from other European languages
-var detector lingua.LanguageDetector
+// Add these metrics
+var (
+	wsMessageProcessingTime = prometheus.NewHistogram(prometheus.HistogramOpts{
+		Name:    "norsky_ws_message_processing_seconds",
+		Help:    "Time spent processing websocket messages",
+		Buckets: prometheus.ExponentialBuckets(0.001, 2, 10),
+	})
 
-func InitDetector() {
-	if detector == nil {
-		detector = lingua.NewLanguageDetectorBuilder().FromLanguages(lingua.AllLanguages()...).WithMinimumRelativeDistance(0.25).Build()
-	}
+	wsMessageBacklog = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "norsky_ws_message_backlog",
+		Help: "Number of messages waiting to be processed",
+	})
+)
+
+func init() {
+	prometheus.MustRegister(wsMessageProcessingTime)
+	prometheus.MustRegister(wsMessageBacklog)
 }
 
-// Keep track of processed event and posts count to show stats in the web interface
-var (
-	processedEvents int64
-	processedPosts  int64
-)
+func NewLanguageDetector(targetLangs []lingua.Language) lingua.LanguageDetector {
+	// Always include English plus target languages
+	languages := lingua.AllLanguages()
+
+	return lingua.NewLanguageDetectorBuilder().
+		FromLanguages(languages...).
+		WithMinimumRelativeDistance(0.25).
+		Build()
+}
 
 // Add a pool for the FeedPost struct to reduce GC pressure
 // Instead of allocating new FeedPost structs for every post,
@@ -175,7 +193,6 @@ func ContainsRepetitivePattern(text string) bool {
 						minRepeats = 2
 					}
 					if repeats >= minRepeats {
-						log.Debugf("Found repeating pattern '%v' (%d times)", pattern, repeats)
 						return true
 					}
 				} else {
@@ -247,19 +264,16 @@ func ContainsSpamContent(text string) bool {
 
 	// If more than 5 hashtags, consider it spam
 	if hashtagCount > 5 {
-		log.Infof("Skipping spam post with many hashtags: %s", text)
 		return true
 	}
 
 	// If more than 5 mentions, consider it spam
 	if mentionCount > 5 {
-		log.Infof("Skipping spam post with many mentions: %s", text)
 		return true
 	}
 
 	// Check for repeated hashtags or mentions (common spam pattern)
 	if strings.Count(text, "##") > 0 || strings.Count(text, "@@") > 0 {
-		log.Infof("Skipping spam post with repeated hashtags/mentions: %s", text)
 		return true
 	}
 
@@ -270,7 +284,6 @@ func ContainsSpamContent(text string) bool {
 		symbolRatio := float64(hashtagCount+mentionCount) / float64(len(words))
 		// If more than 50% of words are hashtags or mentions combined, consider it spam
 		if symbolRatio > 0.5 {
-			log.Infof("Skipping spam post with high hashtag/mention ratio: %s", text)
 			return true
 		}
 	}
@@ -288,11 +301,10 @@ type FirehoseConfig struct {
 // Subscribe to the firehose using the Firehose struct as a receiver
 func Subscribe(ctx context.Context, postChan chan interface{}, ticker *time.Ticker, seq int64, config FirehoseConfig) {
 
-	InitDetector()
-
 	address := "wss://bsky.network/xrpc/com.atproto.sync.subscribeRepos"
 	headers := http.Header{}
 	headers.Set("User-Agent", "NorSky: https://github.com/snorremd/norsky")
+	headers.Set("Accept-Encoding", "gzip")
 
 	if seq >= 0 {
 		log.Info("Starting from sequence: ", seq)
@@ -303,12 +315,16 @@ func Subscribe(ctx context.Context, postChan chan interface{}, ticker *time.Tick
 	dialer := websocket.Dialer{
 		ReadBufferSize:   wsReadBufferSize,
 		WriteBufferSize:  wsWriteBufferSize,
-		HandshakeTimeout: 30 * time.Second,
+		HandshakeTimeout: 45 * time.Second,
+		NetDialContext: (&net.Dialer{
+			Timeout:   45 * time.Second,
+			KeepAlive: 45 * time.Second,
+		}).DialContext,
 	}
 
 	backoff := backoff.NewExponentialBackOff()
-	backoff.InitialInterval = 1 * time.Second
-	backoff.MaxInterval = 600 * time.Second
+	backoff.InitialInterval = 100 * time.Millisecond
+	backoff.MaxInterval = 30 * time.Second
 	backoff.Multiplier = 1.5
 	backoff.MaxElapsedTime = 0
 
@@ -330,14 +346,14 @@ func Subscribe(ctx context.Context, postChan chan interface{}, ticker *time.Tick
 			backoff.Reset()
 
 			// Set initial deadlines
-			conn.SetReadDeadline(time.Now().Add(60 * time.Second))
-			conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+			conn.SetReadDeadline(time.Now().Add(wsReadTimeout))
+			conn.SetWriteDeadline(time.Now().Add(wsWriteTimeout))
 
-			// Start ping ticker
-			pingTicker := time.NewTicker(60 * time.Second)
+			// Start ping ticker with shorter interval
+			pingTicker := time.NewTicker(wsPingInterval)
 			defer pingTicker.Stop()
 
-			// Start ping goroutine
+			// Update ping goroutine
 			go func() {
 				for {
 					select {
@@ -345,13 +361,13 @@ func Subscribe(ctx context.Context, postChan chan interface{}, ticker *time.Tick
 						return
 					case <-pingTicker.C:
 						log.Debug("Sending ping to check connection")
-						if err := conn.WriteControl(websocket.PingMessage, []byte{}, time.Now().Add(10*time.Second)); err != nil {
+						if err := conn.WriteControl(websocket.PingMessage, []byte{}, time.Now().Add(wsWriteTimeout)); err != nil {
 							log.Warn("Ping failed, closing connection for restart: ", err)
 							conn.Close()
 							return
 						}
 						// Reset read deadline after successful ping
-						if err := conn.SetReadDeadline(time.Now().Add(60 * time.Second)); err != nil {
+						if err := conn.SetReadDeadline(time.Now().Add(wsReadTimeout)); err != nil {
 							log.Warn("Failed to set read deadline, closing connection: ", err)
 							conn.Close()
 							return
@@ -360,6 +376,12 @@ func Subscribe(ctx context.Context, postChan chan interface{}, ticker *time.Tick
 				}
 			}()
 
+			// Add connection close handler
+			conn.SetCloseHandler(func(code int, text string) error {
+				log.Infof("WebSocket connection closed with code %d: %s", code, text)
+				return nil
+			})
+
 			// Remove pong handler since server doesn't respond
 			// Keep ping handler for completeness
 			conn.SetPingHandler(func(appData string) error {
@@ -367,16 +389,20 @@ func Subscribe(ctx context.Context, postChan chan interface{}, ticker *time.Tick
 				return conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 			})
 
-			scheduler := autoscaling.NewScheduler(
-				autoscaling.AutoscaleSettings{
-					MaxConcurrency:           runtime.NumCPU(),
-					Concurrency:              2,
-					AutoscaleFrequency:       5 * time.Second,
-					ThroughputBucketDuration: 1 * time.Second,
-					ThroughputBucketCount:    10,
-				},
+			scheduler := sequential.NewScheduler(
+				//runtime.NumCPU(),
+				//100,
+				// autoscaling.AutoscaleSettings{
+
+				// 	MaxConcurrency:           runtime.NumCPU() * 2,
+				// 	Concurrency:              runtime.NumCPU() * 2,
+				// 	AutoscaleFrequency:       10 * time.Second,
+				// 	ThroughputBucketDuration: 2 * time.Second,
+				// 	ThroughputBucketCount:    15,
+				// },
 				conn.RemoteAddr().String(),
 				eventProcessor(postChan, ctx, ticker, config).EventHandler)
+
 			err = events.HandleRepoStream(ctx, conn, scheduler, slog.Default())
 
 			// If error sleep
@@ -401,27 +427,6 @@ func Subscribe(ctx context.Context, postChan chan interface{}, ticker *time.Tick
 	}
 }
 
-func MonitorFirehoseStats(ctx context.Context, statisticsChan chan models.StatisticsEvent) {
-	ticker := time.NewTicker(5 * time.Second)
-	for {
-		select {
-		case <-ticker.C:
-			// Send statistics event
-			statisticsChan <- models.StatisticsEvent{
-				// Divide by 5 and round to get average per second
-				EventsPerSecond: atomic.LoadInt64(&processedEvents) / 5,
-				PostsPerSecond:  atomic.LoadInt64(&processedPosts) / 5,
-			}
-			// Reset processed events and posts
-			atomic.StoreInt64(&processedEvents, 0)
-			atomic.StoreInt64(&processedPosts, 0)
-		case <-ctx.Done():
-			log.Info("Stopping statistics ticker")
-			return
-		}
-	}
-}
-
 // Add new types to help organize the code
 type PostProcessor struct {
 	postChan           chan interface{}
@@ -430,51 +435,37 @@ type PostProcessor struct {
 	config             FirehoseConfig
 	targetLanguages    []lingua.Language
 	supportedLanguages map[lingua.Language]string
+	languageDetector   lingua.LanguageDetector // We should have one detector per worker
 }
 
 // Rename to DetectLanguage since it's no longer Norwegian-specific
 func (p *PostProcessor) DetectLanguage(text string, currentLangs []string, targetLangs []lingua.Language) (bool, []string) {
-	detectedLang, exists := detector.DetectLanguageOf(text)
-	if !exists || detectedLang == lingua.English {
-		return false, currentLangs
-	}
-
-	// Check if detected language is one of our target languages
-	isTargetLang := false
-	for _, lang := range targetLangs {
-		if detectedLang == lang {
-			isTargetLang = true
-			break
-		}
-	}
-	if !isTargetLang {
-		return false, currentLangs
-	}
-
-	// Get confidence scores for target languages
 	var highestConf float64
-	var detectedLingua lingua.Language
+	var detectedLang lingua.Language
 
-	for _, lang := range targetLangs {
-		conf := detector.ComputeLanguageConfidence(text, lang)
+	// Check confidence for English and all target languages
+	for _, lang := range append([]lingua.Language{lingua.English}, targetLangs...) {
+		conf := p.languageDetector.ComputeLanguageConfidence(text, lang)
 		if conf > highestConf {
 			highestConf = conf
-			detectedLingua = lang
+			detectedLang = lang
 		}
-		log.Infof("%s confidence: %.2f (threshold: %.2f)",
-			lang.String(), conf, p.config.ConfidenceThreshold)
 	}
 
-	if highestConf < p.config.ConfidenceThreshold {
+	// If confidence is too low or detected language is English, skip
+	if highestConf < p.config.ConfidenceThreshold || detectedLang == lingua.English {
 		return false, currentLangs
 	}
+
+	log.Infof("%s confidence: %.2f (threshold: %.2f)",
+		detectedLang.String(), highestConf, p.config.ConfidenceThreshold)
 
 	// Create new slice to avoid modifying the input
 	updatedLangs := make([]string, len(currentLangs))
 	copy(updatedLangs, currentLangs)
 
 	// Map lingua language to ISO code
-	langCode := linguaToISO(detectedLingua, p.supportedLanguages)
+	langCode := linguaToISO(detectedLang, p.supportedLanguages)
 	if langCode != "" && !lo.Contains(updatedLangs, langCode) {
 		updatedLangs = append(updatedLangs, langCode)
 	}
@@ -502,30 +493,23 @@ func isoToLingua(code string, languages map[lingua.Language]string) (lingua.Lang
 
 // Handle post processing logic
 func (p *PostProcessor) processPost(evt *atproto.SyncSubscribeRepos_Commit, op *atproto.SyncSubscribeRepos_RepoOp, record *appbsky.FeedPost) error {
+	// Get URI
 	uri := fmt.Sprintf("at://%s/%s", evt.Repo, op.Path)
 
-	// 1. Check word count first (cheapest operation - just string splitting)
 	words := strings.Fields(record.Text)
 	if len(words) < 4 {
-		log.Debugf("Skipping short post with only %d words: %s", len(words), uri)
 		return nil
 	}
 
-	// 3. Check letter ratio (fast character counting)
 	if !HasEnoughLetters(record.Text) {
-		log.Debugf("Skipping post with insufficient letter ratio: %s", uri)
 		return nil
 	}
 
-	// 4. Check for repetitive patterns (string analysis)
 	if ContainsRepetitivePattern(record.Text) {
-		log.Debugf("Skipping post with repetitive pattern: %s", uri)
 		return nil
 	}
 
-	// 5. Check for spam content (string matching)
 	if ContainsSpamContent(record.Text) {
-		log.Debugf("Skipping spam post: %s", uri)
 		return nil
 	}
 
@@ -614,12 +598,11 @@ func eventProcessor(postChan chan interface{}, context context.Context, ticker *
 		config:             config,
 		targetLanguages:    targetLangs,
 		supportedLanguages: supportedLangs,
+		languageDetector:   NewLanguageDetector(targetLangs),
 	}
 
 	return &events.RepoStreamCallbacks{
 		RepoCommit: func(evt *atproto.SyncSubscribeRepos_Commit) error {
-			atomic.AddInt64(&processedEvents, 1)
-
 			rr, err := repo.ReadRepoFromCar(context, bytes.NewReader(evt.Blocks))
 			if err != nil {
 				return fmt.Errorf("failed to read repo from car: %w", err)
@@ -635,8 +618,6 @@ func eventProcessor(postChan chan interface{}, context context.Context, ticker *
 					op.Action != string(repomgr.EvtKindUpdateRecord) {
 					continue
 				}
-
-				atomic.AddInt64(&processedPosts, 1)
 
 				// Get and decode record
 				_, rec, err := rr.GetRecord(context, op.Path)
@@ -673,11 +654,6 @@ func eventProcessor(postChan chan interface{}, context context.Context, ticker *
 			return nil
 		},
 	}
-}
-
-// GetDetector returns the package-level detector for testing
-func GetDetector() lingua.LanguageDetector {
-	return detector
 }
 
 // Rename and modify the function to just get supported languages

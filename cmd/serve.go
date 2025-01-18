@@ -114,9 +114,7 @@ func serveCmd() *cli.Command {
 			firehoseCtx := context.Context(ctx.Context)
 			livenessTicker := time.NewTicker(15 * time.Minute)
 			postChan := make(chan interface{}, 1000)
-			statisticsChan := make(chan models.StatisticsEvent, 1000)
-			dbPostChan := make(chan interface{})   // Channel for writing posts to the database
-			broadcaster := server.NewBroadcaster() // SSE broadcaster
+			dbPostChan := make(chan interface{}) // Channel for writing posts to the database
 
 			dbReader := db.NewReader(database)
 			seq, err := dbReader.GetSequence()
@@ -171,10 +169,9 @@ func serveCmd() *cli.Command {
 
 			// Create the server
 			app := server.Server(&server.ServerConfig{
-				Hostname:    hostname,
-				Reader:      dbReader,
-				Broadcaster: broadcaster,
-				Feeds:       feedMap,
+				Hostname: hostname,
+				Reader:   dbReader,
+				Feeds:    feedMap,
 			})
 
 			// Some glue code to pass posts from the firehose to the database and/or broadcaster
@@ -188,27 +185,11 @@ func serveCmd() *cli.Command {
 				}()
 				for post := range postChan {
 					switch post := post.(type) {
-					// Don't crash if broadcast fails
 					case models.CreatePostEvent:
 						dbPostChan <- post
-						// Broadcast without blocking
-						go broadcaster.BroadcastCreatePost(post) // Broadcast new post to SSE clients
 					default:
 						dbPostChan <- post
 					}
-				}
-			}()
-
-			// Glue code to pass statistics events to the broadcaster
-			go func() {
-				defer func() {
-					if r := recover(); r != nil {
-						log.Errorf("Recovered from panic in statistics broadcast routine: %v", r)
-					}
-				}()
-
-				for stats := range statisticsChan {
-					broadcaster.BroadcastStatistics(stats)
 				}
 			}()
 
@@ -224,16 +205,6 @@ func serveCmd() *cli.Command {
 					ConfidenceThreshold:  confidenceThreshold,
 					Languages:            targetLanguages,
 				})
-			}()
-
-			go func() {
-				defer func() {
-					if r := recover(); r != nil {
-						log.Errorf("Recovered from panic in monitor firehose routine: %v", r)
-					}
-				}()
-				fmt.Println("Starting statistics monitor...")
-				firehose.MonitorFirehoseStats(ctx.Context, statisticsChan)
 			}()
 
 			go func() {

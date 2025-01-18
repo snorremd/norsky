@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"norsky/models"
 	"strconv"
+	"strings"
 	"time"
 
 	sqlbuilder "github.com/huandu/go-sqlbuilder"
@@ -25,7 +26,7 @@ func NewReader(database string) *Reader {
 	}
 }
 
-func (reader *Reader) GetFeed(langs []string, limit int, postId int64) ([]models.FeedPost, error) {
+func (reader *Reader) GetFeed(langs []string, keywords []string, limit int, postId int64) ([]models.FeedPost, error) {
 	sb := sqlbuilder.NewSelectBuilder()
 	sb.Select("DISTINCT posts.id", "posts.uri").From("posts")
 
@@ -33,14 +34,29 @@ func (reader *Reader) GetFeed(langs []string, limit int, postId int64) ([]models
 		sb.Where(sb.LessThan("posts.id", postId))
 	}
 
+	// Build language conditions if specified
 	if len(langs) > 0 {
 		sb.Join("post_languages", "posts.id = post_languages.post_id")
-		// Build OR conditions for each language
-		conditions := make([]string, len(langs))
+		langConditions := make([]string, len(langs))
 		for i, lang := range langs {
-			conditions[i] = sb.Equal("post_languages.language", lang)
+			langConditions[i] = sb.Equal("post_languages.language", lang)
 		}
-		sb.Where(sb.Or(conditions...))
+		sb.Where(sb.Or(langConditions...))
+	}
+
+	// Use FTS search for keywords if specified
+	if len(keywords) > 0 {
+		// Join with FTS table and build search query
+		sb.Join("posts_fts", "posts.id = posts_fts.rowid")
+		searchTerms := make([]string, len(keywords))
+		for i, keyword := range keywords {
+			// Escape quotes and use * for prefix matching
+			escaped := strings.ReplaceAll(keyword, "'", "''")
+			searchTerms[i] = fmt.Sprintf("%s*", escaped)
+		}
+		// Combine terms with OR
+		searchQuery := strings.Join(searchTerms, " OR ")
+		sb.Where(fmt.Sprintf("posts_fts MATCH '%s'", searchQuery))
 	}
 
 	sb.OrderBy("posts.id").Desc()

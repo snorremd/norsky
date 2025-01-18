@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"fmt"
 	"norsky/models"
 	"time"
 
@@ -66,45 +67,56 @@ func processSeq(db *sql.DB, evt models.ProcessSeqEvent) error {
 	return nil
 }
 
-func createPost(db *sql.DB, post models.Post) error {
+func createPost(db *sql.DB, post models.Post) (int64, error) {
 	log.WithFields(log.Fields{
-		"uri":       post.Uri,
-		"languages": post.Languages,
+		"uri":        post.Uri,
+		"languages":  post.Languages,
+		"created_at": time.Unix(post.CreatedAt, 0).Format(time.RFC3339),
+		// Record lag from when the post was created to when it was processed
+		"lagSeconds": time.Since(time.Unix(post.CreatedAt, 0)).Seconds(),
 	}).Info("Creating post")
+
+	// Start a transaction since we need to insert into multiple tables
+	tx, err := db.Begin()
+	if err != nil {
+		return 0, fmt.Errorf("transaction error: %w", err)
+	}
+	defer tx.Rollback()
+
 	// Post insert query
 	insertPost := sqlbuilder.NewInsertBuilder()
-	sql, args := insertPost.InsertInto("posts").Cols("uri", "created_at").Values(post.Uri, post.CreatedAt).Build()
+	insertPost.InsertInto("posts").Cols("uri", "created_at", "text")
+	insertPost.Values(post.Uri, post.CreatedAt, post.Text)
 
-	// Spread args
-	res, err := db.Exec(sql, args...)
+	sql, args := insertPost.Build()
+
+	result, err := tx.Exec(sql, args...)
 	if err != nil {
-		log.Error("Error inserting post", err)
-		return err
+		return 0, fmt.Errorf("insert error: %w", err)
 	}
 
-	// Get inserted id
-	id, err := res.LastInsertId()
+	postId, err := result.LastInsertId()
 	if err != nil {
-		log.Error("Error getting inserted id", err)
-		return err
+		return 0, fmt.Errorf("last insert id error: %w", err)
 	}
 
-	// Post languages insert query
-	insertLangs := sqlbuilder.NewInsertBuilder()
-	insertLangs.InsertInto("post_languages").Cols("post_id", "language")
+	// Insert languages
 	for _, lang := range post.Languages {
-		insertLangs.Values(id, lang)
+		insertLang := sqlbuilder.NewInsertBuilder()
+		insertLang.InsertInto("post_languages").Cols("post_id", "language")
+		insertLang.Values(postId, lang)
+
+		sql, args := insertLang.Build()
+		if _, err := tx.Exec(sql, args...); err != nil {
+			return 0, fmt.Errorf("language insert error: %w", err)
+		}
 	}
-	sql, args = insertLangs.Build()
 
-	_, err = db.Exec(sql, args...)
-
-	if err != nil {
-		log.Error("Error inserting languages", err)
-		return err
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("commit error: %w", err)
 	}
 
-	return nil
+	return postId, nil
 }
 
 func deletePost(db *sql.DB, post models.Post) error {

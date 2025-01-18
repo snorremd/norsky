@@ -45,8 +45,3 @@ type PostsAggregatedByTime struct {
 	Time  time.Time `json:"time"`
 	Count int64     `json:"count"`
 }
-
-type StatisticsEvent struct {
-	EventsPerSecond int64 `json:"eventsPerSecond"`
-	PostsPerSecond  int64 `json:"postsPerSecond"`
-}
