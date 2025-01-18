@@ -48,7 +48,15 @@ func NewReader(database string) *Reader {
 
 func (reader *Reader) GetFeed(langs []string, queries []string, limit int, postId int64, excludeReplies bool) ([]models.FeedPost, error) {
 	sb := sqlbuilder.NewSelectBuilder()
-	sb.Select("DISTINCT posts.id", "posts.uri").From("posts")
+
+	// Start with posts table as base
+	if len(queries) > 0 {
+		// When using FTS, we need to start from the FTS table and join to posts
+		sb.Select("DISTINCT posts.id", "posts.uri").From("posts_fts")
+		sb.Join("posts", "posts.id = posts_fts.rowid")
+	} else {
+		sb.Select("DISTINCT posts.id", "posts.uri").From("posts")
+	}
 
 	if postId != 0 {
 		sb.Where(sb.LessThan("posts.id", postId))
@@ -56,7 +64,7 @@ func (reader *Reader) GetFeed(langs []string, queries []string, limit int, postI
 
 	// Add condition to exclude replies if requested
 	if excludeReplies {
-		sb.Where(sb.IsNull("parent_uri"))
+		sb.Where(sb.IsNull("posts.parent_uri"))
 	}
 
 	// Build language conditions if specified
@@ -71,24 +79,32 @@ func (reader *Reader) GetFeed(langs []string, queries []string, limit int, postI
 
 	// Use FTS search for queries if specified
 	if len(queries) > 0 {
-		// Join with FTS table
-		sb.Join("posts_fts", "posts.id = posts_fts.rowid")
-
-		// Each query can be a complete FTS5 expression
-		searchConditions := make([]string, len(queries))
-		for i, query := range queries {
-			// Pass the FTS5 query directly without modification
-			// We can trust the queries to be safe as they are from the feed config
-			searchConditions[i] = fmt.Sprintf("posts_fts MATCH '%s'",
-				strings.ReplaceAll(query, "'", "''")) // Just escape quotes
+		var validQueries []string
+		for _, query := range queries {
+			// Skip empty queries
+			if strings.TrimSpace(query) == "" {
+				continue
+			}
+			// Escape single quotes in the query
+			safeQuery := strings.ReplaceAll(query, "'", "''")
+			// If query contains spaces, wrap the entire term in quotes
+			if strings.Contains(safeQuery, " ") {
+				safeQuery = `"` + safeQuery + `"`
+			}
+			validQueries = append(validQueries, safeQuery)
 		}
-		// Combine all queries with OR
-		sb.Where(sb.Or(searchConditions...))
+
+		if len(validQueries) > 0 {
+			// In FTS5, terms separated by spaces act as OR
+			matchQuery := strings.Join(validQueries, " ")
+			sb.Where(fmt.Sprintf("posts_fts MATCH '%s'", matchQuery))
+		}
 	}
 
 	sb.OrderBy("posts.id").Desc()
 	sb.Limit(limit)
 
+	// Print the generated SQL
 	sql, args := sb.BuildWithFlavor(sqlbuilder.Flavor(sqlbuilder.SQLite))
 
 	rows, err := reader.db.Query(sql, args...)
