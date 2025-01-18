@@ -29,12 +29,15 @@ func genericAlgo(reader *db.Reader, cursor string, limit int, languages []string
 	var nextCursor *string
 	nextCursor = nil
 
-	if len(posts) > limit {
-		posts = posts[:len(posts)-1]
+	if len(posts) > 0 {
+		if len(posts) > limit {
+			posts = posts[:len(posts)-1]
+		}
 
 		parsed := strconv.FormatInt(posts[len(posts)-1].Id, 10)
 		nextCursor = &parsed
 	}
+
 	return &models.FeedResponse{
 		Feed:   posts,
 		Cursor: nextCursor,
