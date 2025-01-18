@@ -115,6 +115,7 @@ Each feed is defined in a `[[feeds]]` section and currently requires the followi
 - `description` - The description of the feed.
 - `avatar_path` - The path to the avatar image for the feed.
 - `languages` - The languages (iso-639-1 codes) supported by the feed.
+- `keywords` - The keywords to filter posts by.
 
 If you want to run a german language feed you can add the following to your `feeds.toml` file:
 
@@ -127,9 +128,19 @@ avatar_path = "./assets/avatar.png"
 languages = ["de"]
 ```
 
-In the future other fields will be added as optional fields to the feed definition.
-This will allow for filtering on other properties of Bluesky posts.
+### Keyword filtering
 
+Each post is indexed with the SQLite FTS5 extension allowing for fast and efficient keyword searches.
+The index uses the regular unicode61 tokenizer allowing for exact matches, prefix matches, etc.
+See [SQLite FTS5 documentation](https://www.sqlite.org/fts5.html) for more information.
+
+To specify keywords include them in the `keywords` array.
+The keywords are combined using the `OR` operator allowing posts with different keywords to be included in the feed.
+For example, the following keywords will match posts with the keyword "teknologi" or "tech" in the post text, allowing for prefix matches.
+
+```toml
+keywords = ["teknologi*", "tech*"]
+```
 
 ## Development
 

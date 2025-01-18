@@ -46,7 +46,7 @@ func NewReader(database string) *Reader {
 	}
 }
 
-func (reader *Reader) GetFeed(langs []string, keywords []string, limit int, postId int64) ([]models.FeedPost, error) {
+func (reader *Reader) GetFeed(langs []string, queries []string, limit int, postId int64) ([]models.FeedPost, error) {
 	sb := sqlbuilder.NewSelectBuilder()
 	sb.Select("DISTINCT posts.id", "posts.uri").From("posts")
 
@@ -64,19 +64,21 @@ func (reader *Reader) GetFeed(langs []string, keywords []string, limit int, post
 		sb.Where(sb.Or(langConditions...))
 	}
 
-	// Use FTS search for keywords if specified
-	if len(keywords) > 0 {
-		// Join with FTS table and build search query
+	// Use FTS search for queries if specified
+	if len(queries) > 0 {
+		// Join with FTS table
 		sb.Join("posts_fts", "posts.id = posts_fts.rowid")
-		searchTerms := make([]string, len(keywords))
-		for i, keyword := range keywords {
-			// Escape quotes and use * for prefix matching
-			escaped := strings.ReplaceAll(keyword, "'", "''")
-			searchTerms[i] = fmt.Sprintf("%s*", escaped)
+
+		// Each query can be a complete FTS5 expression
+		searchConditions := make([]string, len(queries))
+		for i, query := range queries {
+			// Pass the FTS5 query directly without modification
+			// We can trust the queries to be safe as they are from the feed config
+			searchConditions[i] = fmt.Sprintf("posts_fts MATCH '%s'",
+				strings.ReplaceAll(query, "'", "''")) // Just escape quotes
 		}
-		// Combine terms with OR
-		searchQuery := strings.Join(searchTerms, " OR ")
-		sb.Where(fmt.Sprintf("posts_fts MATCH '%s'", searchQuery))
+		// Combine all queries with OR
+		sb.Where(sb.Or(searchConditions...))
 	}
 
 	sb.OrderBy("posts.id").Desc()

@@ -32,7 +32,16 @@ display_name = "Norwegian TV Shows"
 description = "A feed of Bluesky posts about Norwegian TV shows"
 avatar_path = "./assets/avatar.png"
 languages = ["nb", "nn", "no"]
-keywords = ["tv-serie", "tvserie", "nrk", "tv2", "netflix"]
+keywords = [
+    "tv-serie*",
+    "nrk",
+    "tv2",
+    "netflix",
+    "stream*",
+    "\"beste serie*\"",
+    "\"favoritt serie*\"",
+    "\"streaming\" NOT \"problem\""
+]
 
 [[feeds]]
 id = "tech"
@@ -40,4 +49,9 @@ display_name = "Norwegian Tech"
 description = "A feed of Bluesky posts about technology in Norwegian"
 avatar_path = "./assets/avatar.png"
 languages = ["nb", "nn", "no"]
-keywords = ["teknologi", "programmering", "koding", "kunstig intelligens", "ai"]
+keywords = [
+    "teknologi*",
+    "kunstig intelligens",
+    "programmering",
+    "åpen kildekode"
+]
