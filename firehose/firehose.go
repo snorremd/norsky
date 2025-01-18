@@ -553,12 +553,19 @@ func (p *PostProcessor) processPost(evt *atproto.SyncSubscribeRepos_Commit, op *
 		return fmt.Errorf("failed to parse creation time: %w", err)
 	}
 
+	// Extract parent URI if this is a reply
+	var parentUri string
+	if record.Reply != nil && record.Reply.Parent != nil {
+		parentUri = record.Reply.Parent.Uri
+	}
+
 	p.postChan <- models.CreatePostEvent{
 		Post: models.Post{
 			Uri:       uri,
 			CreatedAt: createdAt.Unix(),
 			Text:      record.Text,
 			Languages: langs,
+			ParentUri: parentUri,
 		},
 	}
 

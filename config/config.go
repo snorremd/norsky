@@ -8,12 +8,13 @@ import (
 )
 
 type FeedConfig struct {
-	ID          string   `toml:"id"`
-	DisplayName string   `toml:"display_name"`
-	Description string   `toml:"description"`
-	AvatarPath  string   `toml:"avatar_path,omitempty"`
-	Languages   []string `toml:"languages"`
-	Keywords    []string `toml:"keywords,omitempty"`
+	ID             string   `toml:"id"`
+	DisplayName    string   `toml:"display_name"`
+	Description    string   `toml:"description"`
+	AvatarPath     string   `toml:"avatar_path"`
+	Languages      []string `toml:"languages"`
+	Keywords       []string `toml:"keywords"`
+	ExcludeReplies bool     `toml:"exclude_replies,omitempty" default:"false"`
 }
 
 type Config struct {

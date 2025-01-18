@@ -116,6 +116,7 @@ Each feed is defined in a `[[feeds]]` section and currently requires the followi
 - `avatar_path` - The path to the avatar image for the feed.
 - `languages` - The languages (iso-639-1 codes) supported by the feed.
 - `keywords` - The keywords to filter posts by.
+- `exclude_replies` - Whether to exclude replies from the feed.
 
 If you want to run a german language feed you can add the following to your `feeds.toml` file:
 

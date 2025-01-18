@@ -9,6 +9,7 @@ type Post struct {
 	Text      string   `json:"text"`
 	Languages []string `json:"languages"`
 	Uri       string   `json:"uri"`
+	ParentUri string   `json:"parentUri,omitempty"`
 }
 
 // Omit all but the Uri field

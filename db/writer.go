@@ -97,6 +97,7 @@ func createPost(ctx context.Context, db *sql.DB, post models.Post) (int64, error
 
 	log.WithFields(log.Fields{
 		"uri":        post.Uri,
+		"parent_uri": post.ParentUri,
 		"languages":  post.Languages,
 		"created_at": time.Unix(post.CreatedAt, 0).Format(time.RFC3339),
 		// Record lag from when the post was created to when it was processed
@@ -105,8 +106,8 @@ func createPost(ctx context.Context, db *sql.DB, post models.Post) (int64, error
 
 	// Post insert query
 	insertPost := sqlbuilder.NewInsertBuilder()
-	insertPost.InsertInto("posts").Cols("uri", "created_at", "text")
-	insertPost.Values(post.Uri, post.CreatedAt, post.Text)
+	insertPost.InsertInto("posts").Cols("uri", "created_at", "text", "parent_uri")
+	insertPost.Values(post.Uri, post.CreatedAt, post.Text, post.ParentUri)
 
 	sql, args := insertPost.Build()
 

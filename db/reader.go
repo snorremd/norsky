@@ -46,12 +46,17 @@ func NewReader(database string) *Reader {
 	}
 }
 
-func (reader *Reader) GetFeed(langs []string, queries []string, limit int, postId int64) ([]models.FeedPost, error) {
+func (reader *Reader) GetFeed(langs []string, queries []string, limit int, postId int64, excludeReplies bool) ([]models.FeedPost, error) {
 	sb := sqlbuilder.NewSelectBuilder()
 	sb.Select("DISTINCT posts.id", "posts.uri").From("posts")
 
 	if postId != 0 {
 		sb.Where(sb.LessThan("posts.id", postId))
+	}
+
+	// Add condition to exclude replies if requested
+	if excludeReplies {
+		sb.Where(sb.IsNull("parent_uri"))
 	}
 
 	// Build language conditions if specified
