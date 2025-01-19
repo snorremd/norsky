@@ -9,6 +9,7 @@ import (
 	"time"
 
 	sqlbuilder "github.com/huandu/go-sqlbuilder"
+	log "github.com/sirupsen/logrus"
 )
 
 type Reader struct {
@@ -85,18 +86,21 @@ func (reader *Reader) GetFeed(langs []string, queries []string, limit int, postI
 			if strings.TrimSpace(query) == "" {
 				continue
 			}
+
 			// Escape single quotes in the query
 			safeQuery := strings.ReplaceAll(query, "'", "''")
-			// If query contains spaces, wrap the entire term in quotes
-			if strings.Contains(safeQuery, " ") {
-				safeQuery = `"` + safeQuery + `"`
+
+			// If query contains spaces or special characters, wrap in quotes
+			if strings.ContainsAny(safeQuery, " +-") {
+				safeQuery = fmt.Sprintf(`"%s"`, safeQuery)
 			}
+
 			validQueries = append(validQueries, safeQuery)
 		}
 
 		if len(validQueries) > 0 {
-			// In FTS5, terms separated by spaces act as OR
-			matchQuery := strings.Join(validQueries, " ")
+			// Join with OR operator explicitly
+			matchQuery := strings.Join(validQueries, " OR ")
 			sb.Where(fmt.Sprintf("posts_fts MATCH '%s'", matchQuery))
 		}
 	}
@@ -106,6 +110,11 @@ func (reader *Reader) GetFeed(langs []string, queries []string, limit int, postI
 
 	// Print the generated SQL
 	sql, args := sb.BuildWithFlavor(sqlbuilder.Flavor(sqlbuilder.SQLite))
+	log.WithFields(log.Fields{
+		"sql":      sql,
+		"args":     args,
+		"keywords": queries,
+	}).Debug("Executing FTS query")
 
 	rows, err := reader.db.Query(sql, args...)
 	if err != nil {
