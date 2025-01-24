@@ -27,20 +27,18 @@ func genericAlgo(reader *db.Reader, cursor string, limit int, languages []string
 	}
 
 	var nextCursor *string
-	nextCursor = nil
-
-	if len(posts) > 0 {
-		if len(posts) > limit {
-			posts = posts[:len(posts)-1]
-		}
-
+	// Only set cursor if we have more results
+	if len(posts) > limit {
+		// Remove the extra post we fetched to check for more results
+		posts = posts[:len(posts)-1]
+		// Set the cursor to the last post's ID
 		parsed := strconv.FormatInt(posts[len(posts)-1].Id, 10)
 		nextCursor = &parsed
 	}
 
 	return &models.FeedResponse{
 		Feed:   posts,
-		Cursor: nextCursor,
+		Cursor: nextCursor, // Will be nil if no more results
 	}, nil
 }
 

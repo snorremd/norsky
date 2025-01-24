@@ -39,7 +39,7 @@ type DeletePostEvent struct {
 
 type FeedResponse struct {
 	Feed   []FeedPost `json:"feed"`
-	Cursor *string    `json:"cursor"`
+	Cursor *string    `json:"cursor,omitempty"`
 }
 
 type PostsAggregatedByTime struct {
