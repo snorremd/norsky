@@ -82,6 +82,37 @@ func serveCmd() *cli.Command {
 				Usage:   "Path to feeds configuration file",
 				EnvVars: []string{"NORSKY_CONFIG"},
 			},
+			&cli.StringSliceFlag{
+				Name:    "jetstream-hosts",
+				Usage:   "List of Jetstream hosts to connect to, fallbacks to next host in list if connection fails",
+				EnvVars: []string{"NORSKY_JETSTREAM_HOSTS"},
+				Value: cli.NewStringSlice(
+					"wss://jetstream1.us-east.bsky.network",
+					"wss://jetstream2.us-east.bsky.network",
+					"wss://jetstream1.us-west.bsky.network",
+					"wss://jetstream2.us-west.bsky.network",
+				),
+			},
+			&cli.BoolFlag{
+				Name:    "jetstream-compress",
+				Usage:   "Enable zstd compression for Jetstream websocket connection",
+				EnvVars: []string{"NORSKY_JETSTREAM_COMPRESS"},
+				Value:   true,
+			},
+			&cli.StringFlag{
+				Name:    "user-agent",
+				Usage:   "User agent string for Jetstream connection (e.g. 'MyApp/1.0.0 (https://example.com)')",
+				EnvVars: []string{"NORSKY_USER_AGENT"},
+				Value:   "",
+			},
+			&cli.StringSliceFlag{
+				Name:    "jetstream-wanted-collections",
+				Usage:   "List of collections to subscribe to (e.g. app.bsky.feed.post)",
+				EnvVars: []string{"NORSKY_JETSTREAM_WANTED_COLLECTIONS"},
+				Value: cli.NewStringSlice(
+					"app.bsky.feed.post", // Default to posts only
+				),
+			},
 		},
 
 		Action: func(ctx *cli.Context) error {
@@ -94,6 +125,11 @@ func serveCmd() *cli.Command {
 			port := ctx.Int("port")
 			confidenceThreshold := ctx.Float64("confidence-threshold")
 			runLanguageDetection := ctx.Bool("run-language-detection")
+			jetstreamHosts := ctx.StringSlice("jetstream-hosts")
+			jetstreamCompress := ctx.Bool("jetstream-compress")
+			userAgent := ctx.String("user-agent")
+			wantedCollections := ctx.StringSlice("jetstream-wanted-collections")
+
 			// Check if any of the required flags are missing
 			if hostname == "" {
 				return errors.New("missing required flag: --hostname")
@@ -204,6 +240,10 @@ func serveCmd() *cli.Command {
 					RunLanguageDetection: runLanguageDetection,
 					ConfidenceThreshold:  confidenceThreshold,
 					Languages:            targetLanguages,
+					JetstreamHosts:       jetstreamHosts,
+					JetstreamCompress:    jetstreamCompress,
+					UserAgent:            userAgent,
+					WantedCollections:    wantedCollections,
 				})
 			}()
 
@@ -246,6 +286,10 @@ func serveCmd() *cli.Command {
 								RunLanguageDetection: ctx.Bool("run-language-detection"),
 								ConfidenceThreshold:  ctx.Float64("confidence-threshold"),
 								Languages:            targetLanguages,
+								JetstreamHosts:       ctx.StringSlice("jetstream-hosts"),
+								JetstreamCompress:    ctx.Bool("jetstream-compress"),
+								UserAgent:            ctx.String("user-agent"),
+								WantedCollections:    ctx.StringSlice("jetstream-wanted-collections"),
 							})
 						}
 					}

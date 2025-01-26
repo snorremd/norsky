@@ -27,6 +27,7 @@ func genericAlgo(reader *db.Reader, cursor string, limit int, languages []string
 	}
 
 	var nextCursor *string
+
 	// Only set cursor if we have more results
 	if len(posts) > limit {
 		// Remove the extra post we fetched to check for more results

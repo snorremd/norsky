@@ -7,11 +7,11 @@ toolchain go1.23.3
 require (
 	github.com/BurntSushi/toml v1.4.0
 	github.com/bluesky-social/indigo v0.0.0-20241223053147-c130614850e5
+	github.com/bluesky-social/jetstream v0.0.0-20241210005130-ea96859b93d1
 	github.com/cenkalti/backoff/v4 v4.3.0
 	github.com/cqroot/prompt v0.9.4
 	github.com/gofiber/fiber/v2 v2.52.6
 	github.com/golang-migrate/migrate/v4 v4.18.1
-	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/huandu/go-sqlbuilder v1.33.1
 	github.com/labstack/gommon v0.4.2
@@ -19,7 +19,6 @@ require (
 	github.com/sirupsen/logrus v1.9.3
 	github.com/stretchr/testify v1.10.0
 	github.com/urfave/cli/v2 v2.27.5
-	github.com/valyala/fasthttp v1.58.0
 	golang.org/x/crypto/x509roots/fallback v0.0.0-20250102161546-4a75ba54c28f
 )
 
@@ -33,12 +32,15 @@ require (
 	github.com/cockroachdb/tokenbucket v0.0.0-20230807174530-cc333fc44b06 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/getsentry/sentry-go v0.31.1 // indirect
+	github.com/goccy/go-json v0.10.2 // indirect
 	github.com/golang/snappy v0.0.4 // indirect
+	github.com/google/uuid v1.6.0 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
 	github.com/kr/text v0.2.0 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/shopspring/decimal v1.4.0 // indirect
+	github.com/valyala/fasthttp v1.58.0 // indirect
 	go.opentelemetry.io/auto/sdk v1.1.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
@@ -126,7 +128,7 @@ require (
 	github.com/petar/GoLLRB v0.0.0-20210522233825-ae3b015fd3e9 // indirect
 	github.com/philhofer/fwd v1.1.3-0.20240916144458-20a13a1f6b7c // indirect
 	github.com/polydawn/refmt v0.89.1-0.20221221234430-40501e09de1f // indirect
-	github.com/prometheus/client_golang v1.20.5 // indirect
+	github.com/prometheus/client_golang v1.20.5
 	github.com/prometheus/client_model v0.6.1 // indirect
 	github.com/prometheus/common v0.61.0 // indirect
 	github.com/prometheus/procfs v0.15.1 // indirect

@@ -48,6 +48,14 @@ func NewReader(database string) *Reader {
 }
 
 func (reader *Reader) GetFeed(langs []string, queries []string, limit int, postId int64, excludeReplies bool) ([]models.FeedPost, error) {
+	log.WithFields(log.Fields{
+		"langs":          langs,
+		"queries":        queries,
+		"limit":          limit,
+		"postId":         postId,
+		"excludeReplies": excludeReplies,
+	}).Infof("GetFeed called with parameters")
+
 	sb := sqlbuilder.NewSelectBuilder()
 
 	// Start with posts table as base
@@ -90,8 +98,18 @@ func (reader *Reader) GetFeed(langs []string, queries []string, limit int, postI
 			// Escape single quotes in the query
 			safeQuery := strings.ReplaceAll(query, "'", "''")
 
-			// If query contains spaces or special characters, wrap in quotes
-			if strings.ContainsAny(safeQuery, " +-") {
+			// Handle wildcards and special cases
+			if strings.Contains(safeQuery, "*") {
+				// For wildcards, we need to ensure the * is at the end and the term is quoted
+				if !strings.HasSuffix(safeQuery, "*") {
+					// If wildcard is in the middle, treat as exact match
+					safeQuery = strings.ReplaceAll(safeQuery, "*", "")
+				}
+				// Remove quotes if they exist and re-add them around the entire term
+				safeQuery = strings.Trim(safeQuery, "\"")
+				safeQuery = fmt.Sprintf(`"%s"`, safeQuery)
+			} else if strings.ContainsAny(safeQuery, " +-") {
+				// For phrases and special operators, wrap in quotes
 				safeQuery = fmt.Sprintf(`"%s"`, safeQuery)
 			}
 
@@ -111,10 +129,9 @@ func (reader *Reader) GetFeed(langs []string, queries []string, limit int, postI
 	// Print the generated SQL
 	sql, args := sb.BuildWithFlavor(sqlbuilder.Flavor(sqlbuilder.SQLite))
 	log.WithFields(log.Fields{
-		"sql":      sql,
-		"args":     args,
-		"keywords": queries,
-	}).Debug("Executing FTS query")
+		"sql":  sql,
+		"args": args,
+	}).Info("Executing query")
 
 	rows, err := reader.db.Query(sql, args...)
 	if err != nil {
