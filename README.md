@@ -7,7 +7,8 @@ The dashboard shows interesting statistics about the feed and Norwegian language
 It is written in TypeScript using Solid.js and Tailwind CSS.
 
 > [!IMPORTANT]
-> Version 1.0.0 introduces breaking changes that require a new `feeds.toml` configuration file. The feed configuration has been moved from hardcoded values to a TOML file that allows you to configure multiple feeds with different language settings. See the example configuration in `feeds.example.toml` for reference.
+> Version 2.0.0 uses PostgreSQL instead of SQLite. This is a breaking change and requires a new database configuration.
+> See [./docker](./docker) for an examples on how to configure Norsky to use PostgreSQL with Docker Compose.
 
 
 
@@ -32,6 +33,8 @@ sudo mv norsky /usr/local/bin
 ```bash
 docker pull ghrc.io/snorreio/norsky:latest
 ```
+
+See [./docker](./docker) for examples on how to run Norsky with [Docker Compose](https://docs.docker.com/compose/).
 
 ### From go source
 

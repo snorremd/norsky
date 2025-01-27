@@ -17,18 +17,49 @@ func migrateCmd() *cli.Command {
 		Description: `Runs database migrations on the configured database. Will create the database if it does not exist.`,
 		Flags: []cli.Flag{
 			&cli.StringFlag{
-				Name:    "database",
-				Aliases: []string{"d"},
-				Value:   "feed.db",
-				Usage:   "SQLite database file location",
-				EnvVars: []string{"NORSKY_DATABASE"},
+				Name:    "db-host",
+				Usage:   "PostgreSQL host",
+				EnvVars: []string{"NORSKY_DB_HOST"},
+				Value:   "localhost",
+			},
+			&cli.IntFlag{
+				Name:    "db-port",
+				Usage:   "PostgreSQL port",
+				EnvVars: []string{"NORSKY_DB_PORT"},
+				Value:   5432,
+			},
+			&cli.StringFlag{
+				Name:    "db-user",
+				Usage:   "PostgreSQL user",
+				EnvVars: []string{"NORSKY_DB_USER"},
+				Value:   "norsky",
+			},
+			&cli.StringFlag{
+				Name:    "db-password",
+				Usage:   "PostgreSQL password",
+				EnvVars: []string{"NORSKY_DB_PASSWORD"},
+				Value:   "norsky",
+			},
+			&cli.StringFlag{
+				Name:    "db-name",
+				Usage:   "PostgreSQL database name",
+				EnvVars: []string{"NORSKY_DB_NAME"},
+				Value:   "norsky",
 			},
 		},
 		Action: func(ctx *cli.Context) error {
-			database := ctx.String("database")
-			fmt.Println("Database configured: ", database)
-			err := db.Migrate(database)
-			return err
+			fmt.Printf("Database configured: %s:%d/%s\n",
+				ctx.String("db-host"),
+				ctx.Int("db-port"),
+				ctx.String("db-name"),
+			)
+			return db.Migrate(
+				ctx.String("db-host"),
+				ctx.Int("db-port"),
+				ctx.String("db-user"),
+				ctx.String("db-password"),
+				ctx.String("db-name"),
+			)
 		},
 	}
 }
@@ -40,18 +71,49 @@ func rollbackCmd() *cli.Command {
 		Description: `Rolls back the last database migration`,
 		Flags: []cli.Flag{
 			&cli.StringFlag{
-				Name:    "database",
-				Aliases: []string{"d"},
-				Value:   "feed.db",
-				Usage:   "SQLite database file location",
-				EnvVars: []string{"NORSKY_DATABASE"},
+				Name:    "db-host",
+				Usage:   "PostgreSQL host",
+				EnvVars: []string{"NORSKY_DB_HOST"},
+				Value:   "localhost",
+			},
+			&cli.IntFlag{
+				Name:    "db-port",
+				Usage:   "PostgreSQL port",
+				EnvVars: []string{"NORSKY_DB_PORT"},
+				Value:   5432,
+			},
+			&cli.StringFlag{
+				Name:    "db-user",
+				Usage:   "PostgreSQL user",
+				EnvVars: []string{"NORSKY_DB_USER"},
+				Value:   "norsky",
+			},
+			&cli.StringFlag{
+				Name:    "db-password",
+				Usage:   "PostgreSQL password",
+				EnvVars: []string{"NORSKY_DB_PASSWORD"},
+				Value:   "norsky",
+			},
+			&cli.StringFlag{
+				Name:    "db-name",
+				Usage:   "PostgreSQL database name",
+				EnvVars: []string{"NORSKY_DB_NAME"},
+				Value:   "norsky",
 			},
 		},
 		Action: func(ctx *cli.Context) error {
-			database := ctx.String("database")
-			fmt.Println("Database configured: ", database)
-			err := db.Rollback(database)
-			return err
+			fmt.Printf("Database configured: %s:%d/%s\n",
+				ctx.String("db-host"),
+				ctx.Int("db-port"),
+				ctx.String("db-name"),
+			)
+			return db.Rollback(
+				ctx.String("db-host"),
+				ctx.Int("db-port"),
+				ctx.String("db-user"),
+				ctx.String("db-password"),
+				ctx.String("db-name"),
+			)
 		},
 	}
 }

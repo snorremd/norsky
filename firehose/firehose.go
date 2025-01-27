@@ -2,7 +2,10 @@ package firehose
 
 import (
 	"context"
+	"norsky/db"
 	"time"
+
+	log "github.com/sirupsen/logrus"
 )
 
 // FirehoseConfig holds configuration for the firehose processing
@@ -17,20 +20,31 @@ type FirehoseConfig struct {
 }
 
 // Subscribe to the firehose using the Firehose struct as a receiver
-func Subscribe(ctx context.Context, postChan chan interface{}, ticker *time.Ticker, seq int64, config FirehoseConfig) {
+func Subscribe(ctx context.Context, postChan chan interface{}, ticker *time.Ticker, db *db.DB, config FirehoseConfig) {
+	// Get latest post timestamp
+	latestTime, err := db.GetLatestPostTimestamp(ctx)
+	if err != nil {
+		log.Errorf("Failed to get latest post timestamp: %v", err)
+	}
 
-	// Create a new parallel processor to deserialize and process incoming messages from the jetstream firehose
-	pp := NewParallelProcessor(ctx, 10, 1000, config, postChan)
+	// If we have a latest post, start 10 seconds before it
+	var cursor int64
+	if !latestTime.IsZero() {
+		cursor = latestTime.Add(-10 * time.Second).UnixMicro()
+	}
 
-	// Subscribe to the jetstream firehose
+	// Create a new parallel processor
+	pp := NewParallelProcessor(ctx, 10, 1000, db, config)
+
+	// Subscribe to the jetstream firehose with cursor
 	SubscribeJetstreamWithMessages(ctx, JetstreamConfig{
 		Hosts:             config.JetstreamHosts,
 		Compress:          config.JetstreamCompress,
 		UserAgent:         config.UserAgent,
 		WantedCollections: config.WantedCollections,
+		Cursor:            cursor, // Add the cursor
 	}, pp.workerQueue)
 
-	// Create a new parallel processor to process incoming messages from the jetstream firehose
+	// Start the parallel processor
 	pp.start()
-
 }

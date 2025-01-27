@@ -2,7 +2,6 @@ package server
 
 import (
 	"embed"
-	"fmt"
 	"net/http"
 	"norsky/db"
 	"norsky/feeds"
@@ -28,12 +27,11 @@ import (
 var dist embed.FS
 
 type ServerConfig struct {
-
 	// The hostname to use for the server
 	Hostname string
 
-	// The reader to use for reading posts
-	Reader *db.Reader
+	// The database connection
+	DB *db.DB
 
 	// Add feeds to config
 	Feeds map[string]feeds.Feed
@@ -57,7 +55,6 @@ func init() {
 
 // Returns a fiber.App instance to be used as an HTTP server for the norsky feed
 func Server(config *ServerConfig) *fiber.App {
-
 	app := fiber.New()
 
 	// Middleware to track the latency of each request
@@ -158,7 +155,6 @@ func Server(config *ServerConfig) *fiber.App {
 	})
 
 	app.Get("/xrpc/app.bsky.feed.getFeedSkeleton", func(c *fiber.Ctx) error {
-		// Get the feed query parameters and parse the limit
 		feed := c.Query("feed", "at://did:web:"+config.Hostname+"/app.bsky.feed.generator/all")
 		cursor := c.Query("cursor", "")
 		limit, err := strconv.ParseInt(c.Query("limit", "20"), 0, 32)
@@ -166,10 +162,9 @@ func Server(config *ServerConfig) *fiber.App {
 			limit = 20
 		}
 
-		// Parse the feed URI
 		uri, err := syntax.ParseATURI(feed)
 		if err != nil {
-			fmt.Println("Error parsing URI", err)
+			log.Error("Error parsing URI", err)
 			return c.Status(400).SendString("Invalid feed URI")
 		}
 
@@ -182,9 +177,9 @@ func Server(config *ServerConfig) *fiber.App {
 		}).Info("Generate feed skeleton with parameters")
 
 		if feed, ok := config.Feeds[feedName]; ok {
-			posts, err := feed.Algorithm(config.Reader, cursor, int(limit))
+			posts, err := feed.Algorithm(config.DB, cursor, int(limit))
 			if err != nil {
-				fmt.Println("Error calling algorithm", err)
+				log.Error("Error calling algorithm", err)
 				return c.Status(500).SendString("Error calling algorithm")
 			}
 			return c.JSON(posts)
@@ -198,26 +193,14 @@ func Server(config *ServerConfig) *fiber.App {
 		lang := c.Query("lang", "")
 		time := c.Query("time", "")
 
-		if time == "" {
-			time = "hour"
-		}
-
-		// check if time is hour, day or week
-		if time != "hour" && time != "day" && time != "week" {
-			return c.Status(400).SendString("Invalid time")
-		}
-
-		// Get posts per time
-		postsPerTime, err := config.Reader.GetPostCountPerTime(lang, time)
+		postsPerTime, err := config.DB.GetPostCountPerTime(lang, time)
 		if err != nil {
-			log.WithFields(log.Fields{
-				"error": err,
-			}).Error("Error getting posts per time")
-
+			log.Error("Error getting posts per time", err)
 			return c.Status(500).SendString("Error getting posts per time")
 		}
 
 		log.WithFields(log.Fields{
+			"time":  time,
 			"lang":  lang,
 			"count": len(postsPerTime),
 		}).Info("Get posts per time")

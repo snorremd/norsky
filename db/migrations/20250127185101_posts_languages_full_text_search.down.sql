@@ -1,0 +1,3 @@
+DROP TABLE IF EXISTS post_languages;
+DROP TABLE IF EXISTS sequence;
+DROP TABLE IF EXISTS posts; 

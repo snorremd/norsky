@@ -16,6 +16,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/golang-migrate/migrate/v4"
 	log "github.com/sirupsen/logrus"
 	"github.com/urfave/cli/v2"
 )
@@ -36,13 +37,6 @@ func serveCmd() *cli.Command {
 		written to the SQLite database and can be accessed via the HTTP API as specified
 		in the Bluesky API specification.`,
 		Flags: []cli.Flag{
-			&cli.StringFlag{
-				Name:    "database",
-				Aliases: []string{"d"},
-				Value:   "feed.db",
-				Usage:   "SQLite database file location",
-				EnvVars: []string{"NORSKY_DATABASE"},
-			},
 			&cli.StringFlag{
 				Name:    "hostname",
 				Aliases: []string{"n"},
@@ -113,13 +107,62 @@ func serveCmd() *cli.Command {
 					"app.bsky.feed.post", // Default to posts only
 				),
 			},
+			&cli.StringFlag{
+				Name:    "db-host",
+				Usage:   "PostgreSQL host",
+				EnvVars: []string{"NORSKY_DB_HOST"},
+				Value:   "localhost",
+			},
+			&cli.IntFlag{
+				Name:    "db-port",
+				Usage:   "PostgreSQL port",
+				EnvVars: []string{"NORSKY_DB_PORT"},
+				Value:   5432,
+			},
+			&cli.StringFlag{
+				Name:    "db-user",
+				Usage:   "PostgreSQL user",
+				EnvVars: []string{"NORSKY_DB_USER"},
+				Value:   "norsky",
+			},
+			&cli.StringFlag{
+				Name:    "db-password",
+				Usage:   "PostgreSQL password",
+				EnvVars: []string{"NORSKY_DB_PASSWORD"},
+				Value:   "norsky",
+			},
+			&cli.StringFlag{
+				Name:    "db-name",
+				Usage:   "PostgreSQL database name",
+				EnvVars: []string{"NORSKY_DB_NAME"},
+				Value:   "norsky",
+			},
 		},
 
 		Action: func(ctx *cli.Context) error {
 
 			log.Info("Starting Norsky feed generator")
 
-			database := ctx.String("database")
+			// Run migrations first
+			if err := db.Migrate(
+				ctx.String("db-host"),
+				ctx.Int("db-port"),
+				ctx.String("db-user"),
+				ctx.String("db-password"),
+				ctx.String("db-name"),
+			); err != nil && err != migrate.ErrNoChange {
+				return fmt.Errorf("failed to run migrations: %w", err)
+			}
+
+			// Initialize single database connection for both reads and writes
+			database := db.NewDB(
+				ctx.String("db-host"),
+				ctx.Int("db-port"),
+				ctx.String("db-user"),
+				ctx.String("db-password"),
+				ctx.String("db-name"),
+			)
+
 			hostname := ctx.String("hostname")
 			host := ctx.String("host")
 			port := ctx.Int("port")
@@ -130,7 +173,6 @@ func serveCmd() *cli.Command {
 			userAgent := ctx.String("user-agent")
 			wantedCollections := ctx.StringSlice("jetstream-wanted-collections")
 
-			// Check if any of the required flags are missing
 			if hostname == "" {
 				return errors.New("missing required flag: --hostname")
 			}
@@ -139,25 +181,16 @@ func serveCmd() *cli.Command {
 				return errors.New("confidence-threshold must be between 0 and 1")
 			}
 
-			err := db.Migrate(database)
-
-			if err != nil {
-				return fmt.Errorf("failed to run database migrations: %w", err)
-			}
-
 			// Channel for subscribing to bluesky posts
-			// Create new child context for the firehose connection
 			firehoseCtx := context.Context(ctx.Context)
 			livenessTicker := time.NewTicker(15 * time.Minute)
 			postChan := make(chan interface{}, 1000)
-			dbPostChan := make(chan interface{}) // Channel for writing posts to the database
 
-			dbReader := db.NewReader(database)
-			seq, err := dbReader.GetSequence()
-
-			if err != nil {
-				log.Warn("Failed to get sequence from database, starting from 0")
-			}
+			// Get initial sequence
+			// seq, err := database.GetSequence()
+			// if err != nil {
+			// 	log.Warn("Failed to get sequence from database, starting from 0")
+			// }
 
 			// Setup the server and firehose
 			cfg, err := config.LoadConfig(ctx.String("config"))
@@ -203,40 +236,39 @@ func serveCmd() *cli.Command {
 				log.Infof("Detecting specific languages: %v", targetLanguages)
 			}
 
-			// Create the server
+			// Create the server with unified database connection
 			app := server.Server(&server.ServerConfig{
 				Hostname: hostname,
-				Reader:   dbReader,
+				DB:       database,
 				Feeds:    feedMap,
 			})
 
-			// Some glue code to pass posts from the firehose to the database and/or broadcaster
-			// Ideally one might want to do this in a more elegant way
-			// TODO: Move broadcaster into server package, i.e. make server a receiver and handle broadcaster and fiber together
+			// Process posts using the unified database connection
 			go func() {
 				defer func() {
 					if r := recover(); r != nil {
-						log.Errorf("Recovered from panic in post broadcast routine: %v", r)
+						log.Errorf("Recovered from panic in post processing routine: %v", r)
 					}
 				}()
 				for post := range postChan {
-					switch post := post.(type) {
+					switch event := post.(type) {
 					case models.CreatePostEvent:
-						dbPostChan <- post
+						if err := database.CreatePost(ctx.Context, event.Post); err != nil {
+							log.Errorf("Failed to create post: %v", err)
+						}
+					case models.DeletePostEvent:
+						if err := database.DeletePost(ctx.Context, event.Post); err != nil {
+							log.Errorf("Failed to delete post: %v", err)
+						}
 					default:
-						dbPostChan <- post
+						log.Info("Unknown post type")
 					}
 				}
 			}()
 
 			go func() {
-				defer func() {
-					if r := recover(); r != nil {
-						log.Errorf("Recovered from panic in firehose subscribe routine: %v", r)
-					}
-				}()
 				fmt.Println("Subscribing to firehose...")
-				firehose.Subscribe(firehoseCtx, postChan, livenessTicker, seq, firehose.FirehoseConfig{
+				firehose.Subscribe(firehoseCtx, postChan, livenessTicker, database, firehose.FirehoseConfig{
 					RunLanguageDetection: runLanguageDetection,
 					ConfidenceThreshold:  confidenceThreshold,
 					Languages:            targetLanguages,
@@ -282,7 +314,7 @@ func serveCmd() *cli.Command {
 							firehoseCtx = context.WithValue(firehoseCtx, cancelKey, cancel)
 
 							// Restart subscription in new goroutine
-							go firehose.Subscribe(firehoseCtx, postChan, livenessTicker, seq, firehose.FirehoseConfig{
+							go firehose.Subscribe(firehoseCtx, postChan, livenessTicker, database, firehose.FirehoseConfig{
 								RunLanguageDetection: ctx.Bool("run-language-detection"),
 								ConfidenceThreshold:  ctx.Float64("confidence-threshold"),
 								Languages:            targetLanguages,
@@ -309,16 +341,6 @@ func serveCmd() *cli.Command {
 				}
 			}()
 
-			go func() {
-				defer func() {
-					if r := recover(); r != nil {
-						log.Errorf("Recovered from panic: %v", r)
-					}
-				}()
-				fmt.Println("Starting database writer...")
-				db.Subscribe(ctx.Context, database, dbPostChan)
-			}()
-
 			// Wait for SIGINT (Ctrl+C) or SIGTERM (docker stop) to stop the server
 
 			<-ctx.Context.Done()
@@ -328,6 +350,7 @@ func serveCmd() *cli.Command {
 				log.Error(err)
 			}
 			log.Info("Norsky feed generator stopped")
+
 			return nil
 		},
 	}

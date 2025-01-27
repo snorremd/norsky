@@ -1,4 +1,3 @@
-
 dist/
 tmp/
 feed.db
@@ -7,3 +6,5 @@ node_modules
 server/dist
 queries/
 feeds.toml
+.env
+docker/.env

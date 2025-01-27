@@ -2,6 +2,7 @@ package firehose
 
 import (
 	"context"
+	"norsky/db"
 	"sync"
 
 	log "github.com/sirupsen/logrus"
@@ -17,7 +18,7 @@ type ParallelProcessor struct {
 	cancel      context.CancelFunc
 }
 
-func NewParallelProcessor(ctx context.Context, maxWorkers int, maxQueueSize int, config FirehoseConfig, postChan chan interface{}) *ParallelProcessor {
+func NewParallelProcessor(ctx context.Context, maxWorkers int, maxQueueSize int, db *db.DB, config FirehoseConfig) *ParallelProcessor {
 	ctx, cancel := context.WithCancel(ctx)
 
 	// Setup new parallel processor with maxWorkers go routines
@@ -25,14 +26,13 @@ func NewParallelProcessor(ctx context.Context, maxWorkers int, maxQueueSize int,
 		maxWorkers:  maxWorkers,
 		workerQueue: make(chan *RawMessage, maxQueueSize),
 		processors:  make([]*PostProcessor, maxWorkers),
-		postChan:    postChan,
 		ctx:         ctx,
 		cancel:      cancel,
 	}
 
 	// Create workers
 	for i := 0; i < maxWorkers; i++ {
-		pp.processors[i] = NewPostProcessor(ctx, config, postChan)
+		pp.processors[i] = NewPostProcessor(ctx, config, db)
 	}
 
 	return pp

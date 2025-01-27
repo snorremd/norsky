@@ -1,0 +1,32 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:17
+    container_name: norsky-postgres
+    environment:
+      POSTGRES_DB: norsky
+      POSTGRES_USER: norsky
+      POSTGRES_PASSWORD: norsky
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U norsky"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: norsky-pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@example.com
+      PGADMIN_DEFAULT_PASSWORD: hunter2
+    ports:
+      - "127.0.0.1:5050:80"
+    depends_on:
+      - postgres
+volumes:
+  postgres_data: 

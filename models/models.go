@@ -18,10 +18,6 @@ type FeedPost struct {
 	Uri string `json:"post"`
 }
 
-type ProcessSeqEvent struct {
-	Seq int64
-}
-
 // CreateEvent fired when a new post is created
 type CreatePostEvent struct {
 	Post Post

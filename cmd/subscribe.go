@@ -44,6 +44,26 @@ Prints all other log messages to stderr.`,
 				EnvVars: []string{"NORSKY_CONFIDENCE_THRESHOLD"},
 				Value:   0.6,
 			},
+			&cli.StringSliceFlag{
+				Name:    "jetstream-hosts",
+				Usage:   "Jetstream hosts",
+				EnvVars: []string{"NORSKY_JETSTREAM_HOSTS"},
+			},
+			&cli.BoolFlag{
+				Name:    "jetstream-compress",
+				Usage:   "Jetstream compress",
+				EnvVars: []string{"NORSKY_JETSTREAM_COMPRESS"},
+			},
+			&cli.StringFlag{
+				Name:    "user-agent",
+				Usage:   "User agent",
+				EnvVars: []string{"NORSKY_USER_AGENT"},
+			},
+			&cli.StringSliceFlag{
+				Name:    "jetstream-wanted-collections",
+				Usage:   "Jetstream wanted collections",
+				EnvVars: []string{"NORSKY_JETSTREAM_WANTED_COLLECTIONS"},
+			},
 		},
 		Action: func(ctx *cli.Context) error {
 			// Get the context for this process to pass to firehose
@@ -103,11 +123,15 @@ Prints all other log messages to stderr.`,
 					ctx.Context,
 					postChan,
 					ticker,
-					-1,
+					nil,
 					firehose.FirehoseConfig{
 						RunLanguageDetection: ctx.Bool("run-language-detection"),
 						ConfidenceThreshold:  ctx.Float64("confidence-threshold"),
 						Languages:            targetLanguages,
+						JetstreamHosts:       ctx.StringSlice("jetstream-hosts"),
+						JetstreamCompress:    ctx.Bool("jetstream-compress"),
+						UserAgent:            ctx.String("user-agent"),
+						WantedCollections:    ctx.StringSlice("jetstream-wanted-collections"),
 					},
 				)
 			}()

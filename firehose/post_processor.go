@@ -16,6 +16,7 @@ import (
 	"github.com/samber/lo"
 	log "github.com/sirupsen/logrus"
 
+	"norsky/db"
 	norsky_models "norsky/models"
 )
 
@@ -26,17 +27,18 @@ type PostProcessor struct {
 	decoder            *zstd.Decoder
 	targetLanguages    []lingua.Language
 	supportedLanguages map[lingua.Language]string
-	languageDetector   lingua.LanguageDetector // We should have one detector per worker
+	languageDetector   lingua.LanguageDetector
+	db                 *db.DB
 }
 
-func NewPostProcessor(ctx context.Context, config FirehoseConfig, postChan chan interface{}) *PostProcessor {
-
+func NewPostProcessor(ctx context.Context, config FirehoseConfig, db *db.DB) *PostProcessor {
 	pp := &PostProcessor{
 		context:            ctx,
 		config:             config,
 		targetLanguages:    targetLanguagesToLingua(config.Languages),
 		supportedLanguages: getSupportedLanguages(),
 		languageDetector:   NewLanguageDetector(targetLanguagesToLingua(config.Languages)),
+		db:                 db,
 	}
 
 	if config.JetstreamCompress {
@@ -142,14 +144,18 @@ func (p *PostProcessor) processPost(msg *RawMessage) error {
 		"parentUri": parentUri,
 	}).Info("Adding post to database")
 
-	p.postChan <- norsky_models.CreatePostEvent{
-		Post: norsky_models.Post{
-			Uri:       uri,
-			CreatedAt: createdAt.Unix(),
-			Text:      record.Text,
-			Languages: langs,
-			ParentUri: parentUri,
-		},
+	// Create post object
+	post := norsky_models.Post{
+		Uri:       uri,
+		CreatedAt: createdAt.Unix(),
+		Text:      record.Text,
+		Languages: langs,
+		ParentUri: parentUri,
+	}
+
+	// Write directly to database instead of using channel
+	if err := p.db.CreatePost(p.context, post); err != nil {
+		return fmt.Errorf("failed to create post in database: %w", err)
 	}
 
 	return nil

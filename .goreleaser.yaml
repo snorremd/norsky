@@ -81,6 +81,14 @@ docker_manifests:
   image_templates:
   - ghcr.io/snorremd/{{ .ProjectName }}:{{ .Version }}-amd64
   - ghcr.io/snorremd/{{ .ProjectName }}:{{ .Version }}-arm64v8
+- name_template: ghcr.io/snorremd/{{ .ProjectName }}:v{{ .Major }}
+  image_templates:
+  - ghcr.io/snorremd/{{ .ProjectName }}:{{ .Version }}-amd64
+  - ghcr.io/snorremd/{{ .ProjectName }}:{{ .Version }}-arm64v8
+- name_template: ghcr.io/snorremd/{{ .ProjectName }}:v{{ .Major }}.{{ .Minor }}
+  image_templates:
+  - ghcr.io/snorremd/{{ .ProjectName }}:{{ .Version }}-amd64
+  - ghcr.io/snorremd/{{ .ProjectName }}:{{ .Version }}-arm64v8
 
 changelog:
   sort: asc

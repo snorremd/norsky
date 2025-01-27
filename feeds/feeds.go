@@ -10,13 +10,13 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-type Algorithm func(reader *db.Reader, cursor string, limit int) (*models.FeedResponse, error)
+type Algorithm func(db *db.DB, cursor string, limit int) (*models.FeedResponse, error)
 
 // Reuse genericAlgo for all algorithms
-func genericAlgo(reader *db.Reader, cursor string, limit int, languages []string, keywords []string, excludeReplies bool) (*models.FeedResponse, error) {
+func genericAlgo(db *db.DB, cursor string, limit int, languages []string, keywords []string, excludeReplies bool) (*models.FeedResponse, error) {
 	postId := safeParseCursor(cursor)
 
-	posts, err := reader.GetFeed(languages, keywords, limit+1, postId, excludeReplies)
+	posts, err := db.GetFeed(languages, keywords, limit+1, postId, excludeReplies)
 	if err != nil {
 		log.Error("Error getting feed", err)
 		return nil, err
@@ -43,8 +43,8 @@ func genericAlgo(reader *db.Reader, cursor string, limit int, languages []string
 	}, nil
 }
 
-// safeParseCursor parses the cursor string and returns the unix time and post id
-// If the cursor is invalid, it returns 0, 0, nil
+// safeParseCursor parses the cursor string and returns the post id
+// If the cursor is invalid, it returns 0
 func safeParseCursor(cursor string) int64 {
 	id, err := strconv.ParseInt(cursor, 10, 64)
 	if err != nil {
@@ -86,7 +86,7 @@ func InitializeFeeds(cfg *config.Config) map[string]Feed {
 
 // Helper function to create an algorithm based on languages
 func createAlgorithm(languages []string, keywords []string, excludeReplies bool) Algorithm {
-	return func(reader *db.Reader, cursor string, limit int) (*models.FeedResponse, error) {
-		return genericAlgo(reader, cursor, limit, languages, keywords, excludeReplies)
+	return func(db *db.DB, cursor string, limit int) (*models.FeedResponse, error) {
+		return genericAlgo(db, cursor, limit, languages, keywords, excludeReplies)
 	}
 }
