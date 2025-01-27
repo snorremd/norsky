@@ -86,6 +86,7 @@ services:
     container_name: norsky-prod
     restart: unless-stopped
     environment:
+      NORSKY_HOST: ${NORSKY_HOST}
       NORSKY_DB_HOST: postgres
       NORSKY_DB_PORT: 5432
       NORSKY_DB_USER: ${POSTGRES_USER:-norsky}

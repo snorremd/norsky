@@ -2,37 +2,36 @@ version: '3.8'
 
 services:
 
-  # Setup traefik proxy for Norsky with automatic letsencrypt certificates
   traefik:
-  image: "traefik:v3.1"
-  container_name: "traefik"
-  restart: always
-  command:
-    - "--api.insecure=true"
-    - "--providers.docker=true"
-    - "--providers.docker.exposedbydefault=false"
-    - "--entrypoints.web.address=:80"
-    - "--entrypoints.websecure.address=:443"
-    - "--entrypoints.websecure.http3.advertisedport=443"
-    - "--entrypoints.web.http.redirections.entryPoint.to=websecure"
-    - "--entrypoints.web.http.redirections.entryPoint.scheme=https"
-    - "--entrypoints.web.http.redirections.entrypoint.permanent=true"
-    - "--certificatesresolvers.myresolver.acme.httpchallenge=true"
-    - "--certificatesresolvers.myresolver.acme.httpchallenge.entrypoint=web"
-    - "--certificatesresolvers.myresolver.acme.email=${TRAEFIK_ACME_EMAIL}"
-    - "--certificatesresolvers.myresolver.acme.storage=/letsencrypt/acme.json"
-    - "--metrics.prometheus=true"
-    - "--metrics.prometheus.buckets=0.1,0.3,1.2,5.0"
-    - "--metrics.prometheus.addrouterslabels=true"
-    - "--metrics.prometheus.addServicesLabels=true"
-  ports:
-    - "80:80"
-    - "443:443"
-    - "443:443/udp"
-    - "127.0.0.1:8088:8080"
-  volumes:
-    - "./letsencrypt:/letsencrypt"
-    - "/var/run/docker.sock:/var/run/docker.sock:ro"
+    image: "traefik:v3.1"
+    container_name: "traefik"
+    restart: always
+    command:
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--entrypoints.websecure.http3.advertisedport=443"
+      - "--entrypoints.web.http.redirections.entryPoint.to=websecure"
+      - "--entrypoints.web.http.redirections.entryPoint.scheme=https"
+      - "--entrypoints.web.http.redirections.entrypoint.permanent=true"
+      - "--certificatesresolvers.myresolver.acme.httpchallenge=true"
+      - "--certificatesresolvers.myresolver.acme.httpchallenge.entrypoint=web"
+      - "--certificatesresolvers.myresolver.acme.email=${TRAEFIK_ACME_EMAIL}"
+      - "--certificatesresolvers.myresolver.acme.storage=/letsencrypt/acme.json"
+      - "--metrics.prometheus=true"
+      - "--metrics.prometheus.buckets=0.1,0.3,1.2,5.0"
+      - "--metrics.prometheus.addrouterslabels=true"
+      - "--metrics.prometheus.addServicesLabels=true"
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+      - "127.0.0.1:8088:8080"
+    volumes:
+      - "./letsencrypt:/letsencrypt"
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
 
 
   postgres:
@@ -122,6 +121,7 @@ services:
     ports:
       - "127.0.0.1:3000:3000"
     environment:
+      NORSKY_HOST: ${NORSKY_HOST}
       NORSKY_DB_HOST: postgres
       NORSKY_DB_PORT: 5432
       NORSKY_DB_USER: ${POSTGRES_USER:-norsky}
