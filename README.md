@@ -134,17 +134,21 @@ languages = ["de"]
 
 ### Keyword filtering
 
-Each post is indexed with the SQLite FTS5 extension allowing for fast and efficient keyword searches.
-The index uses the regular unicode61 tokenizer allowing for exact matches, prefix matches, etc.
-See [SQLite FTS5 documentation](https://www.sqlite.org/fts5.html) for more information.
+The keyword based feeds are based around the PostgreSQL `ts_vector` full text search feature.
+Each post is indexed and the `ts_vector` of the post text is stored in the database for each post.
+This allows for fast and efficient keyword searches.
 
 To specify keywords include them in the `keywords` array.
-The keywords are combined using the `OR` operator allowing posts with different keywords to be included in the feed.
+The keywords are combined using the `OR` operator in Postgres' `websearch_to_tsquery` function allowing posts with different keywords to be included in the feed.
 For example, the following keywords will match posts with the keyword "teknologi" or "tech" in the post text, allowing for prefix matches.
 
 ```toml
 keywords = ["teknologi*", "tech*"]
 ```
+
+Note that we use the `simple` variant of the ts_vector functionality which does not support language specific stemming, etc.
+This is because we don't know the language being configured beforehand and don't want the overhead of having to store ts_vector for every language.
+You can fork this repository and add language specific ts_vector support if you need it.
 
 ## Development
 
