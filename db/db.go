@@ -94,6 +94,7 @@ func (db *DB) DeletePost(ctx context.Context, post models.Post) error {
 // Read operations
 
 func (db *DB) GetFeed(langs []string, queries []string, limit int, postId int64, excludeReplies bool) ([]models.FeedPost, error) {
+
 	log.WithFields(log.Fields{
 		"langs":          langs,
 		"queries":        queries,
@@ -123,13 +124,39 @@ func (db *DB) GetFeed(langs []string, queries []string, limit int, postId int64,
 			if strings.TrimSpace(query) == "" {
 				continue
 			}
-			searchTerms = append(searchTerms,
-				fmt.Sprintf("plainto_tsquery('simple', %s)",
-					sb.Args.Add(query)))
+			// Convert to lowercase as ts_vector stores everything lowercase
+			query = strings.ToLower(query)
+
+			// Check if the query ends with a wildcard
+			hasWildcard := strings.HasSuffix(query, "*")
+			if hasWildcard {
+				query = strings.TrimSuffix(query, "*")
+			}
+
+			// If the query contains spaces, wrap it in quotes
+			if strings.Contains(query, " ") {
+				query = fmt.Sprintf(`"%s"`, query)
+			}
+
+			// Add the wildcard back outside the quotes if needed
+			if hasWildcard {
+				query = query + "*"
+			}
+
+			searchTerms = append(searchTerms, query)
 		}
+
 		if len(searchTerms) > 0 {
-			tsQuery := strings.Join(searchTerms, " || ")
-			sb.Where(fmt.Sprintf("ts_vector @@ (%s)", tsQuery))
+			// Join all terms with OR operator
+			combinedQuery := strings.Join(searchTerms, " OR ")
+
+			log.WithFields(log.Fields{
+				"combinedQuery": combinedQuery,
+			}).Info("Combined search query")
+
+			// Single websearch_to_tsquery call for all terms
+			sb.Where(fmt.Sprintf("ts_vector @@ websearch_to_tsquery('simple', %s)",
+				sb.Args.Add(combinedQuery)))
 		}
 	}
 
@@ -137,6 +164,11 @@ func (db *DB) GetFeed(langs []string, queries []string, limit int, postId int64,
 	sb.Limit(limit)
 
 	sql, args := sb.Build()
+	log.WithFields(log.Fields{
+		"sql":  sql,
+		"args": args,
+	}).Info("Generated SQL query")
+
 	rows, err := db.db.Query(sql, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query error: %w", err)

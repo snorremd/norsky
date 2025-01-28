@@ -131,9 +131,10 @@ func (p *PostProcessor) processPost(msg *RawMessage) error {
 	}
 
 	// Extract parent URI if this is a reply
-	var parentUri string
+	var parentUri *string
 	if record.Reply != nil && record.Reply.Parent != nil {
-		parentUri = record.Reply.Parent.Uri
+		value := record.Reply.Parent.Uri
+		parentUri = &value
 	}
 
 	log.WithFields(log.Fields{
