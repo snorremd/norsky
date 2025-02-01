@@ -42,6 +42,11 @@ keywords = [
     "\"favoritt serie*\"",
     "\"streaming\" NOT \"problem\""
 ]
+exclude_keywords = [
+    "podcast*",
+    "radio*",
+    "\"teknisk problem*\"",
+]
 
 [[feeds]]
 id = "tech"

@@ -93,14 +93,14 @@ func (db *DB) DeletePost(ctx context.Context, post models.Post) error {
 
 // Read operations
 
-func (db *DB) GetFeed(langs []string, queries []string, limit int, postId int64, excludeReplies bool) ([]models.FeedPost, error) {
-
+func (db *DB) GetFeed(langs []string, keywords []string, excludeKeywords []string, limit int, postId int64, excludeReplies bool) ([]models.FeedPost, error) {
 	log.WithFields(log.Fields{
-		"langs":          langs,
-		"queries":        queries,
-		"limit":          limit,
-		"postId":         postId,
-		"excludeReplies": excludeReplies,
+		"langs":           langs,
+		"keywords":        keywords,
+		"excludeKeywords": excludeKeywords,
+		"limit":           limit,
+		"postId":          postId,
+		"excludeReplies":  excludeReplies,
 	}).Info("Getting feed")
 
 	sb := sqlbuilder.PostgreSQL.NewSelectBuilder()
@@ -118,45 +118,62 @@ func (db *DB) GetFeed(langs []string, queries []string, limit int, postId int64,
 		sb.Where(fmt.Sprintf("languages && %s", sb.Args.Add(pq.Array(langs))))
 	}
 
-	if len(queries) > 0 {
-		var searchTerms []string
-		for _, query := range queries {
+	// Handle keywords and exclude keywords in a single query
+	if len(keywords) > 0 || len(excludeKeywords) > 0 {
+		var includeTerms []string
+		var excludeTerms []string
+
+		// Process include terms
+		for _, query := range keywords {
 			if strings.TrimSpace(query) == "" {
 				continue
 			}
-			// Convert to lowercase as ts_vector stores everything lowercase
 			query = strings.ToLower(query)
-
-			// Check if the query ends with a wildcard
 			hasWildcard := strings.HasSuffix(query, "*")
 			if hasWildcard {
 				query = strings.TrimSuffix(query, "*")
 			}
-
-			// If the query contains spaces, wrap it in quotes
 			if strings.Contains(query, " ") {
 				query = fmt.Sprintf(`"%s"`, query)
 			}
-
-			// Add the wildcard back outside the quotes if needed
 			if hasWildcard {
 				query = query + "*"
 			}
-
-			searchTerms = append(searchTerms, query)
+			includeTerms = append(includeTerms, query)
 		}
 
-		if len(searchTerms) > 0 {
-			// Join all terms with OR operator
-			combinedQuery := strings.Join(searchTerms, " OR ")
+		// Process exclude terms
+		for _, query := range excludeKeywords {
+			if strings.TrimSpace(query) == "" {
+				continue
+			}
+			query = strings.ToLower(query)
+			hasWildcard := strings.HasSuffix(query, "*")
+			if hasWildcard {
+				query = strings.TrimSuffix(query, "*")
+			}
+			if strings.Contains(query, " ") {
+				query = fmt.Sprintf(`"%s"`, query)
+			}
+			if hasWildcard {
+				query = query + "*"
+			}
+			excludeTerms = append(excludeTerms, query)
+		}
 
-			log.WithFields(log.Fields{
-				"combinedQuery": combinedQuery,
-			}).Info("Combined search query")
+		var query string
 
-			// Single websearch_to_tsquery call for all terms
+		if len(includeTerms) > 0 && len(excludeTerms) > 0 {
+			query = "(" + strings.Join(includeTerms, " OR ") + " ) AND NOT (" + strings.Join(excludeTerms, " OR ") + " )"
+		} else if len(includeTerms) > 0 {
+			query = "(" + strings.Join(includeTerms, " OR ") + " )"
+		} else if len(excludeTerms) > 0 {
+			query = "NOT (" + strings.Join(excludeTerms, " OR ") + " )"
+		}
+
+		if query != "" {
 			sb.Where(fmt.Sprintf("ts_vector @@ websearch_to_tsquery('simple', %s)",
-				sb.Args.Add(combinedQuery)))
+				sb.Args.Add(query)))
 		}
 	}
 

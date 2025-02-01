@@ -13,10 +13,10 @@ import (
 type Algorithm func(db *db.DB, cursor string, limit int) (*models.FeedResponse, error)
 
 // Reuse genericAlgo for all algorithms
-func genericAlgo(db *db.DB, cursor string, limit int, languages []string, keywords []string, excludeReplies bool) (*models.FeedResponse, error) {
+func genericAlgo(db *db.DB, cursor string, limit int, languages []string, keywords []string, excludeKeywords []string, excludeReplies bool) (*models.FeedResponse, error) {
 	postId := safeParseCursor(cursor)
 
-	posts, err := db.GetFeed(languages, keywords, limit+1, postId, excludeReplies)
+	posts, err := db.GetFeed(languages, keywords, excludeKeywords, limit+1, postId, excludeReplies)
 	if err != nil {
 		log.Error("Error getting feed", err)
 		return nil, err
@@ -54,14 +54,15 @@ func safeParseCursor(cursor string) int64 {
 }
 
 type Feed struct {
-	Id             string
-	DisplayName    string
-	Description    string
-	AvatarPath     string
-	Languages      []string
-	Keywords       []string
-	ExcludeReplies bool
-	Algorithm      Algorithm
+	Id              string
+	DisplayName     string
+	Description     string
+	AvatarPath      string
+	Languages       []string
+	Keywords        []string
+	ExcludeKeywords []string
+	ExcludeReplies  bool
+	Algorithm       Algorithm
 }
 
 // Create a new function to initialize feeds from config
@@ -70,14 +71,15 @@ func InitializeFeeds(cfg *config.Config) map[string]Feed {
 
 	for _, feedCfg := range cfg.Feeds {
 		feeds[feedCfg.ID] = Feed{
-			Id:             feedCfg.ID,
-			DisplayName:    feedCfg.DisplayName,
-			Description:    feedCfg.Description,
-			AvatarPath:     feedCfg.AvatarPath,
-			Languages:      feedCfg.Languages,
-			Keywords:       feedCfg.Keywords,
-			ExcludeReplies: feedCfg.ExcludeReplies,
-			Algorithm:      createAlgorithm(feedCfg.Languages, feedCfg.Keywords, feedCfg.ExcludeReplies),
+			Id:              feedCfg.ID,
+			DisplayName:     feedCfg.DisplayName,
+			Description:     feedCfg.Description,
+			AvatarPath:      feedCfg.AvatarPath,
+			Languages:       feedCfg.Languages,
+			Keywords:        feedCfg.Keywords,
+			ExcludeKeywords: feedCfg.ExcludeKeywords,
+			ExcludeReplies:  feedCfg.ExcludeReplies,
+			Algorithm:       createAlgorithm(feedCfg.Languages, feedCfg.Keywords, feedCfg.ExcludeKeywords, feedCfg.ExcludeReplies),
 		}
 	}
 
@@ -85,8 +87,8 @@ func InitializeFeeds(cfg *config.Config) map[string]Feed {
 }
 
 // Helper function to create an algorithm based on languages
-func createAlgorithm(languages []string, keywords []string, excludeReplies bool) Algorithm {
+func createAlgorithm(languages []string, keywords []string, excludeKeywords []string, excludeReplies bool) Algorithm {
 	return func(db *db.DB, cursor string, limit int) (*models.FeedResponse, error) {
-		return genericAlgo(db, cursor, limit, languages, keywords, excludeReplies)
+		return genericAlgo(db, cursor, limit, languages, keywords, excludeKeywords, excludeReplies)
 	}
 }
