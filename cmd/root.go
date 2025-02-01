@@ -21,7 +21,6 @@ func RootApp() *cli.App {
 
 		Flags can generally be set via environment variables, e.g.:
 
-		--database => NORSKY_DATABASE=feed.db
 		--port => NORSKY_PORT=8080
 		`,
 		Commands: []*cli.Command{

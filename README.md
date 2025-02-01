@@ -1,7 +1,7 @@
 # Norsky
 
 Norsky is a lightweight ATProto feed server that serves Norwegian posts from the Bluesky instance.
-It is written in Go and stores posts in a SQLite database to keep things simple.
+It is written in Go and stores posts in a PostgreSQL database.
 A dashboard is available at the root of the server `/`.
 The dashboard shows interesting statistics about the feed and Norwegian language posts.
 It is written in TypeScript using Solid.js and Tailwind CSS.
@@ -11,7 +11,6 @@ It is written in TypeScript using Solid.js and Tailwind CSS.
 > See [./docker](./docker) for an examples on how to configure Norsky to use PostgreSQL with Docker Compose.
 
 
-
 ## Installation
 
 The feed server is a standalone go binary that you can run on your machine.
@@ -19,9 +18,11 @@ It is also available as a Docker image.
 
 ### From GitHub release
 
+You can find the latest release on the [releases page](/releases).
+
 ```bash
 # On Linux you would typically do
-curl -O https://github.com/snorremd/norsky/releases/download/v0.1.4/norsky_Linux_x86_64.tar.gz
+curl -O https://github.com/snorremd/norsky/releases/download/v2.0.1/norsky_Linux_x86_64.tar.gz
 tar -xvf norsky_Linux_x86_64.tar.gz
 chmod +x norsky
 # If you want to install it globally you can move it to /usr/local/bin
@@ -80,7 +81,11 @@ norsky serve --hostname yourdomain.tld --port 8080 --database /path/to/db/feed.d
 # Or docker run
 docker run -d \
     --env=NORSKY_HOSTNAME="yourdomain.tld" \
-    --env NORSKY_DATABASE="/db/feed.db" \
+    --env NORSKY_DB_HOST="localhost" \
+    --env NORSKY_DB_PORT="5432" \
+    --env NORSKY_DB_USER="postgres" \
+    --env NORSKY_DB_PASSWORD="postgres" \
+    --env NORSKY_DB_NAME="postgres" \
     --env NORSKY_CONFIG="/feeds.toml" \
     --name norsky \
     -p 3000:3000 \
