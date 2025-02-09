@@ -118,12 +118,9 @@ func (db *DB) GetFeed(langs []string, keywords []string, excludeKeywords []strin
 		sb.Where(fmt.Sprintf("languages && %s", sb.Args.Add(pq.Array(langs))))
 	}
 
-	// Handle keywords and exclude keywords in a single query
-	if len(keywords) > 0 || len(excludeKeywords) > 0 {
+	// Handle keywords and exclude keywords as separate queries
+	if len(keywords) > 0 {
 		var includeTerms []string
-		var excludeTerms []string
-
-		// Process include terms
 		for _, query := range keywords {
 			if strings.TrimSpace(query) == "" {
 				continue
@@ -142,7 +139,15 @@ func (db *DB) GetFeed(langs []string, keywords []string, excludeKeywords []strin
 			includeTerms = append(includeTerms, query)
 		}
 
-		// Process exclude terms
+		if len(includeTerms) > 0 {
+			includeQuery := strings.Join(includeTerms, " OR ")
+			sb.Where(fmt.Sprintf("ts_vector @@ websearch_to_tsquery('simple', %s)",
+				sb.Args.Add(includeQuery)))
+		}
+	}
+
+	if len(excludeKeywords) > 0 {
+		var excludeTerms []string
 		for _, query := range excludeKeywords {
 			if strings.TrimSpace(query) == "" {
 				continue
@@ -161,19 +166,10 @@ func (db *DB) GetFeed(langs []string, keywords []string, excludeKeywords []strin
 			excludeTerms = append(excludeTerms, query)
 		}
 
-		var query string
-
-		if len(includeTerms) > 0 && len(excludeTerms) > 0 {
-			query = "(" + strings.Join(includeTerms, " OR ") + " ) AND NOT (" + strings.Join(excludeTerms, " OR ") + " )"
-		} else if len(includeTerms) > 0 {
-			query = "(" + strings.Join(includeTerms, " OR ") + " )"
-		} else if len(excludeTerms) > 0 {
-			query = "NOT (" + strings.Join(excludeTerms, " OR ") + " )"
-		}
-
-		if query != "" {
-			sb.Where(fmt.Sprintf("ts_vector @@ websearch_to_tsquery('simple', %s)",
-				sb.Args.Add(query)))
+		if len(excludeTerms) > 0 {
+			excludeQuery := strings.Join(excludeTerms, " OR ")
+			sb.Where(fmt.Sprintf("NOT (ts_vector @@ websearch_to_tsquery('simple', %s))",
+				sb.Args.Add(excludeQuery)))
 		}
 	}
 
