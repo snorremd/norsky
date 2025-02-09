@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"fmt"
 	"norsky/models"
-	"strings"
 	"time"
 
 	sqlbuilder "github.com/huandu/go-sqlbuilder"
@@ -93,16 +92,14 @@ func (db *DB) DeletePost(ctx context.Context, post models.Post) error {
 
 // Read operations
 
-func (db *DB) GetFeed(langs []string, keywords []string, excludeKeywords []string, limit int, postId int64, excludeReplies bool) ([]models.FeedPost, error) {
-	log.WithFields(log.Fields{
-		"langs":           langs,
-		"keywords":        keywords,
-		"excludeKeywords": excludeKeywords,
-		"limit":           limit,
-		"postId":          postId,
-		"excludeReplies":  excludeReplies,
-	}).Info("Getting feed")
+// GetFeed handles basic language-based feeds without keyword scoring
+func (db *DB) GetFeed(langs []string, preparedKeywords string, preparedExcludeKeywords string, limit int, postId int64, excludeReplies bool) ([]models.FeedPost, error) {
+	// If we have an include query, use the scored feed function
+	if preparedKeywords != "" {
+		return db.GetScoredFeed(langs, preparedKeywords, preparedExcludeKeywords, limit, postId, excludeReplies)
+	}
 
+	// Original implementation for language-only feeds
 	sb := sqlbuilder.PostgreSQL.NewSelectBuilder()
 	sb.Select("DISTINCT posts.id", "posts.uri").From("posts")
 
@@ -118,59 +115,10 @@ func (db *DB) GetFeed(langs []string, keywords []string, excludeKeywords []strin
 		sb.Where(fmt.Sprintf("languages && %s", sb.Args.Add(pq.Array(langs))))
 	}
 
-	// Handle keywords and exclude keywords as separate queries
-	if len(keywords) > 0 {
-		var includeTerms []string
-		for _, query := range keywords {
-			if strings.TrimSpace(query) == "" {
-				continue
-			}
-			query = strings.ToLower(query)
-			hasWildcard := strings.HasSuffix(query, "*")
-			if hasWildcard {
-				query = strings.TrimSuffix(query, "*")
-			}
-			if strings.Contains(query, " ") {
-				query = fmt.Sprintf(`"%s"`, query)
-			}
-			if hasWildcard {
-				query = query + "*"
-			}
-			includeTerms = append(includeTerms, query)
-		}
-
-		if len(includeTerms) > 0 {
-			includeQuery := strings.Join(includeTerms, " OR ")
-			sb.Where(fmt.Sprintf("ts_vector @@ websearch_to_tsquery('simple', %s)",
-				sb.Args.Add(includeQuery)))
-		}
-	}
-
-	if len(excludeKeywords) > 0 {
-		var excludeTerms []string
-		for _, query := range excludeKeywords {
-			if strings.TrimSpace(query) == "" {
-				continue
-			}
-			query = strings.ToLower(query)
-			hasWildcard := strings.HasSuffix(query, "*")
-			if hasWildcard {
-				query = strings.TrimSuffix(query, "*")
-			}
-			if strings.Contains(query, " ") {
-				query = fmt.Sprintf(`"%s"`, query)
-			}
-			if hasWildcard {
-				query = query + "*"
-			}
-			excludeTerms = append(excludeTerms, query)
-		}
-
-		if len(excludeTerms) > 0 {
-			excludeQuery := strings.Join(excludeTerms, " OR ")
-			sb.Where(fmt.Sprintf("NOT (ts_vector @@ websearch_to_tsquery('simple', %s))",
-				sb.Args.Add(excludeQuery)))
-		}
+	// Handle exclude query if specified
+	if preparedExcludeKeywords != "" {
+		sb.Where(fmt.Sprintf("NOT (ts_vector @@ websearch_to_tsquery('simple', %s))",
+			sb.Args.Add(preparedExcludeKeywords)))
 	}
 
 	sb.OrderBy("posts.id").Desc()
@@ -192,6 +140,78 @@ func (db *DB) GetFeed(langs []string, keywords []string, excludeKeywords []strin
 	for rows.Next() {
 		var post models.FeedPost
 		if err := rows.Scan(&post.Id, &post.Uri); err != nil {
+			return nil, fmt.Errorf("scan error: %w", err)
+		}
+		posts = append(posts, post)
+	}
+
+	return posts, nil
+}
+
+// GetScoredFeed handles keyword-based feeds with relevance scoring
+func (db *DB) GetScoredFeed(langs []string, preparedKeywords string, preparedExcludeKeywords string, limit int, postId int64, excludeReplies bool) ([]models.FeedPost, error) {
+	log.WithFields(log.Fields{
+		"langs":          langs,
+		"includeQuery":   preparedKeywords,
+		"excludeQuery":   preparedExcludeKeywords,
+		"limit":          limit,
+		"postId":         postId,
+		"excludeReplies": excludeReplies,
+	}).Info("Getting scored feed")
+
+	sb := sqlbuilder.PostgreSQL.NewSelectBuilder()
+
+	// Add scoring to the select clause
+	sb.Select(
+		"DISTINCT posts.id",
+		"posts.uri",
+		fmt.Sprintf(`(
+			ts_rank(ts_vector, websearch_to_tsquery('simple', %s), 32) * 
+			(1.0 + (EXTRACT(EPOCH FROM (NOW() - created_at)) / 86400.0))^(-0.5)
+		) as score`,
+			sb.Args.Add(preparedKeywords),
+		),
+	).From("posts")
+
+	if postId != 0 {
+		sb.Where(sb.LessThan("posts.id", postId))
+	}
+
+	if excludeReplies {
+		sb.Where(sb.IsNull("posts.parent_uri"))
+	}
+
+	if len(langs) > 0 {
+		sb.Where(fmt.Sprintf("languages && %s", sb.Args.Add(pq.Array(langs))))
+	}
+
+	// Handle exclude query if specified
+	if preparedExcludeKeywords != "" {
+		sb.Where(fmt.Sprintf("NOT (ts_vector @@ websearch_to_tsquery('simple', %s))",
+			sb.Args.Add(preparedExcludeKeywords)))
+	}
+
+	// Order by score first, then by ID
+	sb.OrderBy("score DESC", "posts.id DESC")
+	sb.Limit(limit)
+
+	sql, args := sb.Build()
+	log.WithFields(log.Fields{
+		"sql":  sql,
+		"args": args,
+	}).Info("Generated SQL query")
+
+	rows, err := db.db.Query(sql, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query error: %w", err)
+	}
+	defer rows.Close()
+
+	var posts []models.FeedPost
+	for rows.Next() {
+		var post models.FeedPost
+		var score float64
+		if err := rows.Scan(&post.Id, &post.Uri, &score); err != nil {
 			return nil, fmt.Errorf("scan error: %w", err)
 		}
 		posts = append(posts, post)
