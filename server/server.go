@@ -34,7 +34,7 @@ type ServerConfig struct {
 	DB *db.DB
 
 	// Add feeds to config
-	Feeds map[string]feeds.Feed
+	Feeds feeds.FeedMap
 }
 
 var (
@@ -177,10 +177,10 @@ func Server(config *ServerConfig) *fiber.App {
 		}).Info("Generate feed skeleton with parameters")
 
 		if feed, ok := config.Feeds[feedName]; ok {
-			posts, err := feed.Algorithm(config.DB, cursor, int(limit))
+			posts, err := feed.GetFeedPosts(cursor, int(limit))
 			if err != nil {
-				log.Error("Error calling algorithm", err)
-				return c.Status(500).SendString("Error calling algorithm")
+				log.Error("Error getting feed posts", err)
+				return c.Status(500).SendString("Error getting feed posts")
 			}
 			return c.JSON(posts)
 		}

@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"norsky/bluesky"
-	"norsky/feeds"
 	"os"
 	"time"
 
@@ -84,9 +83,7 @@ Registers the feed with your preferred name, description, etc.`,
 				return fmt.Errorf("failed to load config: %w", err)
 			}
 
-			feedMap := feeds.InitializeFeeds(cfg)
-
-			for _, feed := range feedMap {
+			for _, feed := range cfg.Feeds {
 				existingFeed, ok := lo.Find(actorFeeds.Feeds, func(f *bsky.FeedDefs_GeneratorView) bool {
 					parsed, err := util.ParseAtUri(f.Uri)
 					if err != nil {

@@ -54,6 +54,7 @@ func NewPostProcessor(ctx context.Context, config FirehoseConfig, db *db.DB) *Po
 
 // Handle post processing logic
 func (p *PostProcessor) processPost(msg *RawMessage) error {
+
 	var data []byte
 	var err error
 
@@ -152,10 +153,19 @@ func (p *PostProcessor) processPost(msg *RawMessage) error {
 		Text:      record.Text,
 		Languages: langs,
 		ParentUri: parentUri,
+		Author:    event.Did,
 	}
 
-	// Write directly to database instead of using channel
+	// Add more detailed logging before database write
+	log.WithFields(log.Fields{
+		"uri":       post.Uri,
+		"createdAt": post.CreatedAt,
+		"languages": post.Languages,
+		"authorDid": post.Author,
+	}).Info("Writing post to database")
+
 	if err := p.db.CreatePost(p.context, post); err != nil {
+		log.WithError(err).Error("Failed to write post to database")
 		return fmt.Errorf("failed to create post in database: %w", err)
 	}
 

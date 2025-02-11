@@ -3,6 +3,7 @@ package feeds
 import (
 	"norsky/db"
 	"norsky/models"
+	"norsky/query"
 	"strconv"
 
 	"norsky/config"
@@ -13,47 +14,104 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-type Algorithm func(db *db.DB, cursor string, limit int) (*models.FeedResponse, error)
+// InitializeFeeds creates feeds from configuration
+func InitializeFeeds(cfg *config.TomlConfig, db *db.DB) (map[string]*Feed, error) {
+	feeds := make(map[string]*Feed)
 
-// Add new types to store prepared queries
-type PreparedQueries struct {
-	IncludeQuery string
-	ExcludeQuery string
+	for _, feedConfig := range cfg.Feeds {
+		builder := NewFeedQueryBuilder()
+
+		// Add filters
+		for _, filterConfig := range feedConfig.Filters {
+			filter, err := createFilterStrategy(filterConfig, cfg.Keywords)
+			if err != nil {
+				return nil, fmt.Errorf("error creating filter for feed %s: %w", feedConfig.Id, err)
+			}
+			builder.AddFilter(filter)
+		}
+
+		// Add scoring layers
+		for _, scoringConfig := range feedConfig.Scoring {
+			strategy, err := createScoringStrategy(scoringConfig, cfg.Keywords)
+			if err != nil {
+				return nil, fmt.Errorf("error creating scoring for feed %s: %w", feedConfig.Id, err)
+			}
+			builder.AddScoringLayer(strategy, scoringConfig.Weight)
+		}
+
+		feeds[feedConfig.Id] = &Feed{
+			ID:          feedConfig.Id,
+			DisplayName: feedConfig.DisplayName,
+			Description: feedConfig.Description,
+			AvatarPath:  feedConfig.AvatarPath,
+			DB:          db,
+			builder:     builder,
+		}
+	}
+
+	return feeds, nil
 }
 
-// Reuse genericAlgo for all algorithms
-func genericAlgo(db *db.DB, cursor string, limit int, languages []string, preparedKeywords string, preparedExcludeKeywords string, excludeReplies bool) (*models.FeedResponse, error) {
-	postId := safeParseCursor(cursor)
+// createFilterStrategy creates a Filter from config
+func createFilterStrategy(config config.TomlFilter, keywords config.TomlKeywords) (query.FilterStrategy, error) {
+	switch config.Type {
+	case "language":
+		return &LanguageFilter{Languages: config.Languages}, nil
+	case "keyword":
+		// Combine keywords from referenced lists
+		var includeKeywords, excludeKeywords []string
+		for _, ref := range config.Include {
+			if kw, ok := keywords[ref]; ok {
+				includeKeywords = append(includeKeywords, kw...)
+			}
+		}
+		for _, ref := range config.Exclude {
+			if kw, ok := keywords[ref]; ok {
+				excludeKeywords = append(excludeKeywords, kw...)
+			}
+		}
+		return &KeywordFilter{
+			IncludeKeywords: strings.Join(includeKeywords, " OR "),
+			ExcludeKeywords: strings.Join(excludeKeywords, " OR "),
+		}, nil
+	case "exclude_replies":
+		return &ExcludeRepliesFilter{}, nil
+	default:
+		return nil, fmt.Errorf("unknown filter type: %s", config.Type)
+	}
+}
 
-	posts, err := db.GetFeed(languages, preparedKeywords, preparedExcludeKeywords, limit+1, postId, excludeReplies)
+// createScoringStrategy creates a ScoringStrategy from config
+func createScoringStrategy(config config.TomlScoring, keywords config.TomlKeywords) (query.ScoringStrategy, error) {
+	switch config.Type {
+	case "time_decay":
+		return &TimeDecayScoring{}, nil
+	case "keyword":
+		if kw, ok := keywords[config.Keywords]; ok {
+			return &KeywordScoring{Keywords: strings.Join(kw, " OR ")}, nil
+		}
+		return nil, fmt.Errorf("keyword list not found: %s", config.Keywords)
+	case "author":
+		return &AuthorScoring{Authors: config.Authors}, nil
+	default:
+		return nil, fmt.Errorf("unknown scoring type: %s", config.Type)
+	}
+}
+
+// GetFeedPosts retrieves posts for a feed with pagination
+func (f *Feed) GetFeedPosts(cursor string, limit int) (*models.FeedResponse, error) {
+	postId := safeParseCursor(cursor)
+	posts, err := f.DB.GetFeedPosts(f.builder, limit+1, postId)
 	if err != nil {
-		log.Error("Error getting feed", err)
+		log.Error("Error getting feed posts", err)
 		return nil, err
 	}
 
-	if posts == nil {
-		posts = []models.FeedPost{}
-	}
-
-	var nextCursor *string
-
-	// Only set cursor if we have more results
-	if len(posts) > limit {
-		// Remove the extra post we fetched to check for more results
-		posts = posts[:len(posts)-1]
-		// Set the cursor to the last post's ID
-		parsed := strconv.FormatInt(posts[len(posts)-1].Id, 10)
-		nextCursor = &parsed
-	}
-
-	return &models.FeedResponse{
-		Feed:   posts,
-		Cursor: nextCursor, // Will be nil if no more results
-	}, nil
+	return createPaginatedResponse(posts, limit)
 }
 
-// safeParseCursor parses the cursor string and returns the post id
-// If the cursor is invalid, it returns 0
+// Helper functions for pagination
+
 func safeParseCursor(cursor string) int64 {
 	id, err := strconv.ParseInt(cursor, 10, 64)
 	if err != nil {
@@ -62,77 +120,20 @@ func safeParseCursor(cursor string) int64 {
 	return id
 }
 
-type Feed struct {
-	Id                      string
-	DisplayName             string
-	Description             string
-	AvatarPath              string
-	Languages               []string
-	Keywords                []string
-	ExcludeKeywords         []string
-	ExcludeReplies          bool
-	Algorithm               Algorithm
-	PreparedKeywords        string
-	PreparedExcludeKeywords string
-}
-
-// Helper function to prepare keyword queries
-func prepareKeywordQuery(keywords []string) string {
-	if len(keywords) == 0 {
-		return ""
+func createPaginatedResponse(posts []models.FeedPost, limit int) (*models.FeedResponse, error) {
+	if posts == nil {
+		posts = []models.FeedPost{}
 	}
 
-	var terms []string
-	for _, query := range keywords {
-		if strings.TrimSpace(query) == "" {
-			continue
-		}
-		query = strings.ToLower(query)
-		hasWildcard := strings.HasSuffix(query, "*")
-		if hasWildcard {
-			query = strings.TrimSuffix(query, "*")
-		}
-		if strings.Contains(query, " ") {
-			query = fmt.Sprintf(`"%s"`, query)
-		}
-		if hasWildcard {
-			query = query + "*"
-		}
-		terms = append(terms, query)
+	var nextCursor *string
+	if len(posts) > limit {
+		posts = posts[:len(posts)-1]
+		parsed := strconv.FormatInt(posts[len(posts)-1].Id, 10)
+		nextCursor = &parsed
 	}
 
-	if len(terms) == 0 {
-		return ""
-	}
-	return strings.Join(terms, " OR ")
-}
-
-// Update InitializeFeeds to prepare queries
-func InitializeFeeds(cfg *config.Config) map[string]Feed {
-	feeds := make(map[string]Feed)
-
-	for _, feedCfg := range cfg.Feeds {
-
-		preparedKeywords := prepareKeywordQuery(feedCfg.Keywords)
-		preparedExcludeKeywords := prepareKeywordQuery(feedCfg.ExcludeKeywords)
-
-		feeds[feedCfg.ID] = Feed{
-			Id:             feedCfg.ID,
-			DisplayName:    feedCfg.DisplayName,
-			Description:    feedCfg.Description,
-			AvatarPath:     feedCfg.AvatarPath,
-			Languages:      feedCfg.Languages,
-			ExcludeReplies: feedCfg.ExcludeReplies,
-			Algorithm:      createAlgorithm(feedCfg.Languages, preparedKeywords, preparedExcludeKeywords, feedCfg.ExcludeReplies),
-		}
-	}
-
-	return feeds
-}
-
-// Update createAlgorithm to use prepared queries
-func createAlgorithm(languages []string, preparedKeywords string, preparedExcludeKeywords string, excludeReplies bool) Algorithm {
-	return func(db *db.DB, cursor string, limit int) (*models.FeedResponse, error) {
-		return genericAlgo(db, cursor, limit, languages, preparedKeywords, preparedExcludeKeywords, excludeReplies)
-	}
+	return &models.FeedResponse{
+		Feed:   posts,
+		Cursor: nextCursor,
+	}, nil
 }

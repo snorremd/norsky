@@ -6,8 +6,14 @@ A dashboard is available at the root of the server `/`.
 The dashboard shows interesting statistics about the feed and Norwegian language posts.
 It is written in TypeScript using Solid.js and Tailwind CSS.
 
+
 > [!IMPORTANT]
-> Version 2.0.0 uses PostgreSQL instead of SQLite. This is a breaking change and requires a new database configuration.
+> Version 3.0.0 introduces a new more powerful feed configuration format and system.
+> You can now flexibly add filters and layered scoring to your feeds.
+> Read more about this in the [feed configuration](#feed-configuration) section.
+
+> [!IMPORTANT]
+> Version 2.0.0 onwards uses PostgreSQL instead of SQLite. This is a breaking change and requires a new database configuration.
 > See [./docker](./docker) for an examples on how to configure Norsky to use PostgreSQL with Docker Compose.
 
 
@@ -115,45 +121,175 @@ NORSKY_RUN_LANGUAGE_DETECTION=true NORSKY_CONFIDENCE_THRESHOLD=0.6 norsky serve
 
 ## Feed configuration
 
-Since version 1.0 the Norsky feed generator supports dynamically loading feeds from a `feeds.toml` file.
-Each feed is defined in a `[[feeds]]` section and currently requires the following fields:
+Since version 3.0.0, Norsky supports a flexible feed configuration system using `feeds.toml`. Each feed is defined in a `[[feeds]]` section with the following structure:
 
-- `id` - The id of the feed.
-- `display_name` - The display name of the feed.
-- `description` - The description of the feed.
-- `avatar_path` - The path to the avatar image for the feed.
-- `languages` - The languages (iso-639-1 codes) supported by the feed.
-- `keywords` - The keywords to filter posts by.
-- `exclude_replies` - Whether to exclude replies from the feed.
+### Basic Feed Settings
 
-If you want to run a german language feed you can add the following to your `feeds.toml` file:
+- `id` - The unique identifier of the feed
+- `display_name` - The display name shown in Bluesky
+- `description` - The feed description
+- `avatar_path` - Path to the feed's avatar image
+- `filters` - Filters determine which posts appear in the feed
+- `scoring` - Scoring determines how posts are ranked
+- `keywords` - Predefined keyword lists that can be referenced by keyword filters and scoring
+
+### Filters
+
+Filters determine which posts appear in the feed. Multiple filters can be combined in the `filters` array:
 
 ```toml
 [[feeds]]
-id = "german"
-display_name = "German"
-description = "A feed of Bluesky posts written in German"
+id = "norwegian-tech"
+display_name = "Norwegian Tech"
+description = "Tech posts in Norwegian"
 avatar_path = "./assets/avatar.png"
-languages = ["de"]
+
+filters = [
+    # Language filter - show only Norwegian posts
+    { type = "language", languages = ["nb", "nn", "no"] },
+    
+    # Keyword filter using predefined keyword lists
+    { type = "keyword", include = ["tech-terms"], exclude = ["spam"] },
+    
+    # Exclude replies to keep only top-level posts
+    { type = "exclude_replies" }
+]
 ```
 
-### Keyword filtering
+Available filter types:
+- `language` - Filter by language(s)
+- `keyword` - Filter by keyword lists (include and/or exclude)
+- `exclude_replies` - Remove reply posts from feed
 
-The keyword based feeds are based around the PostgreSQL `ts_vector` full text search feature.
-Each post is indexed and the `ts_vector` of the post text is stored in the database for each post.
-This allows for fast and efficient keyword searches.
+Filters are translated to SQL WHERE clauses and combined using AND.
+This allow you to set up any combination of available filter types without having to write code.
+New filter types can be added later by extending the types of filters and adding additional data to the database.
 
-To specify keywords include them in the `keywords` array.
-The keywords are combined using the `OR` operator in Postgres' `websearch_to_tsquery` function allowing posts with different keywords to be included in the feed.
-For example, the following keywords will match posts with the keyword "teknologi" or "tech" in the post text, allowing for prefix matches.
+### Scoring
+Scoring determines how posts are ranked. Multiple scoring layers can be combined in the `scoring` array, where each layer's score multiplies with the previous layers:
 
 ```toml
-keywords = ["teknologi*", "tech*"]
+scoring = [
+    # Posts naturally decay over time
+    { type = "time_decay", weight = 1.0 },
+    
+    # Boost posts matching tech keywords
+    { type = "keyword", weight = 1.0, keywords = "tech-terms" },
+    
+    # Adjust specific author visibility
+    { type = "author", weight = 1.0, authors = [
+        { did = "did:plc:expert", weight = 2.0 },  # Double this author's score
+        { did = "did:plc:spammer", weight = 0.5 }  # Halve this author's score
+    ]}
+]
 ```
 
-Note that we use the `simple` variant of the ts_vector functionality which does not support language specific stemming, etc.
-This is because we don't know the language being configured beforehand and don't want the overhead of having to store ts_vector for every language.
-You can fork this repository and add language specific ts_vector support if you need it.
+Available scoring types:
+- `time_decay` - Score decreases as posts age using inverse square root
+- `keyword` - Score based on keyword relevance (normalized 0-1)
+- `author` - Adjust scores for specific authors
+
+Scoring is translated to a SQL SELECT statement that is then used in the ORDER BY clause of the SQL query.
+New scoring types can be added later by extending the types of scoring and adding additional data to the database.
+
+### Keyword Lists
+Define reusable keyword lists that can be referenced by filters and scoring:
+
+```toml
+[keywords]
+tech-terms = [
+    "teknologi*",
+    "tech*", 
+    "programming",
+    "open source"
+]
+spam = [
+    "spam*",
+    "scam*",
+    "buy*"
+]
+```
+
+The `*` suffix enables prefix matching in the full-text search. Keywords are combined with OR operators, so posts matching any keyword in the list will be included.
+
+### Complete Example
+
+```toml
+[keywords]
+tech-terms = ["teknologi*", "tech*", "programming"]
+spam = ["spam*", "scam*"]
+
+[[feeds]]
+id = "norwegian-tech"
+display_name = "Norwegian Tech"
+description = "Tech discussions in Norwegian"
+avatar_path = "./assets/avatar.png"
+
+filters = [
+    { type = "language", languages = ["nb", "nn", "no"] },
+    { type = "keyword", include = ["tech-terms"], exclude = ["spam"] },
+    { type = "exclude_replies" }
+]
+
+scoring = [
+    { type = "time_decay", weight = 1.0 },
+    { type = "keyword", weight = 1.0, keywords = "tech-terms" },
+    { type = "author", weight = 1.0, authors = [
+        { did = "did:plc:expert", weight = 2.0 }
+    ]}
+]
+```
+
+### Feed Pagination
+
+Norsky uses cursor-based pagination to reliably return feed posts in chunks. Here's how it works:
+
+1. **Cursor Format**: 
+   - The cursor is simply a post ID
+   - Each response includes a `cursor` field pointing to the last post in that page
+   - First request can use cursor="" or omit it entirely
+
+2. **Stable Ordering**:
+   - Posts are ordered by score and then by post ID
+   - Even as scores change (due to time decay), the post IDs ensure stable pagination
+   - The combination `ORDER BY final_score DESC, posts.id DESC` ensures deterministic ordering
+
+3. **No Duplicates**:
+   - Each page request uses `WHERE posts.id < cursor`
+   - This ensures you only see posts older than your current position
+   - You'll never see the same post twice, even if scores have changed
+
+Example API usage:
+```bash
+# First page (most recent posts)
+GET /xrpc/app.bsky.feed.getFeed?feed=at://did:plc:xyz/app.bsky.feed.generator/tech
+
+# Next page using cursor from previous response
+GET /xrpc/app.bsky.feed.getFeed?feed=at://did:plc:xyz/app.bsky.feed.generator/tech&cursor=123456
+```
+
+Response format:
+```json
+{
+  "feed": [
+    { "post": "at://..." },
+    { "post": "at://..." }
+  ],
+  "cursor": "123456"  // Use this for the next page
+}
+```
+
+Response format end of feed:
+```json
+{
+  "feed": [
+    { "post": "at://..." },
+    { "post": "at://..." }
+  ]
+}
+```
+
+The cursor system works reliably even with complex scoring because it's anchored to the immutable post IDs rather than the changing scores.
 
 ## Development
 

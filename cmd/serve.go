@@ -199,7 +199,10 @@ func serveCmd() *cli.Command {
 			}
 
 			// Initialize feeds and pass to server
-			feedMap := feeds.InitializeFeeds(cfg)
+			feedMap, err := feeds.InitializeFeeds(cfg, database)
+			if err != nil {
+				return fmt.Errorf("failed to initialize feeds: %w", err)
+			}
 
 			// Get unique languages from all feeds
 			languages := make(map[string]struct{})
@@ -207,18 +210,18 @@ func serveCmd() *cli.Command {
 
 			// First pass to check if any feed wants all languages
 			for _, feed := range cfg.Feeds {
-				if len(feed.Languages) == 0 {
+				hasLanguageFilter := false
+				for _, filter := range feed.Filters {
+					if filter.Type == "language" && len(filter.Languages) > 0 {
+						hasLanguageFilter = true
+						for _, lang := range filter.Languages {
+							languages[lang] = struct{}{}
+						}
+					}
+				}
+				if !hasLanguageFilter {
 					detectAllLanguages = true
 					break
-				}
-			}
-
-			// If no feed wants all languages, collect specified languages
-			if !detectAllLanguages {
-				for _, feed := range cfg.Feeds {
-					for _, lang := range feed.Languages {
-						languages[lang] = struct{}{}
-					}
 				}
 			}
 

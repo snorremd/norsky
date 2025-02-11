@@ -10,12 +10,14 @@ type Post struct {
 	Languages []string `json:"languages"`
 	Uri       string   `json:"uri"`
 	ParentUri *string  `json:"parentUri,omitempty"`
+	Author    string   `json:"author"`
 }
 
 // Omit all but the Uri field
 type FeedPost struct {
-	Id  int64  `json:"-"`
-	Uri string `json:"post"`
+	Id    int64   `json:"-"`
+	Uri   string  `json:"post"`
+	Score float64 `json:"-"`
 }
 
 // CreateEvent fired when a new post is created

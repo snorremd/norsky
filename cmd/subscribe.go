@@ -9,6 +9,8 @@ import (
 	"norsky/firehose"
 	"norsky/models"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"norsky/config"
@@ -64,6 +66,12 @@ Prints all other log messages to stderr.`,
 				Usage:   "Jetstream wanted collections",
 				EnvVars: []string{"NORSKY_JETSTREAM_WANTED_COLLECTIONS"},
 			},
+			&cli.BoolFlag{
+				Name:    "run-language-detection",
+				Usage:   "Run language detection on posts",
+				EnvVars: []string{"NORSKY_RUN_LANGUAGE_DETECTION"},
+				Value:   true,
+			},
 		},
 		Action: func(ctx *cli.Context) error {
 			// Get the context for this process to pass to firehose
@@ -83,18 +91,18 @@ Prints all other log messages to stderr.`,
 
 			// First pass to check if any feed wants all languages
 			for _, feed := range cfg.Feeds {
-				if len(feed.Languages) == 0 {
+				hasLanguageFilter := false
+				for _, filter := range feed.Filters {
+					if filter.Type == "language" && len(filter.Languages) > 0 {
+						hasLanguageFilter = true
+						for _, lang := range filter.Languages {
+							languages[lang] = struct{}{}
+						}
+					}
+				}
+				if !hasLanguageFilter {
 					detectAllLanguages = true
 					break
-				}
-			}
-
-			// If no feed wants all languages, collect specified languages
-			if !detectAllLanguages {
-				for _, feed := range cfg.Feeds {
-					for _, lang := range feed.Languages {
-						languages[lang] = struct{}{}
-					}
 				}
 			}
 
@@ -156,6 +164,22 @@ Prints all other log messages to stderr.`,
 					}
 				}
 			}()
+
+			// Create a signal channel to wait for interrupt
+			sigChan := make(chan os.Signal, 1)
+			signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+			// Wait for either interrupt signal or context cancellation
+			select {
+			case <-sigChan:
+				fmt.Println("Received interrupt signal, shutting down...")
+			case <-ctx.Context.Done():
+				fmt.Println("Context cancelled, shutting down...")
+			}
+
+			// Clean up
+			ticker.Stop()
+			close(postChan)
 
 			return nil
 		},
