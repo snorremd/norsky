@@ -43,7 +43,7 @@ func (b *FeedQueryBuilder) Build(limit int, cursor int64) (string, []interface{}
 	// Add base columns
 	sb.Select("posts.id", "posts.uri")
 
-	// Calculate final score if we have scoring layers
+	// Calculate final score if we have scoring layers, otherwise use default score of 1.0
 	if len(b.scoringLayers) > 0 {
 		var scoreTerms []string
 
@@ -59,6 +59,9 @@ func (b *FeedQueryBuilder) Build(limit int, cursor int64) (string, []interface{}
 
 		// Multiply all scores together for final score
 		sb.SelectMore(fmt.Sprintf("(%s) AS score", strings.Join(scoreTerms, " + ")))
+	} else {
+		// Add default score of 1.0 when no scoring layers are configured
+		sb.SelectMore("1.0 AS score")
 	}
 
 	sb.From("posts")
@@ -73,12 +76,8 @@ func (b *FeedQueryBuilder) Build(limit int, cursor int64) (string, []interface{}
 		sb.Where(sb.LessThan("posts.id", cursor))
 	}
 
-	// Order by score if we have scoring layers, otherwise by time
-	if len(b.scoringLayers) > 0 {
-		sb.OrderBy("score DESC", "posts.id DESC")
-	} else {
-		sb.OrderBy("posts.id DESC")
-	}
+	// Always order by score (which will be 1.0 for unscored feeds) and then by ID
+	sb.OrderBy("score DESC", "posts.id DESC")
 
 	sb.Limit(limit)
 
