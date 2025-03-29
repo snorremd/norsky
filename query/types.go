@@ -1,8 +1,6 @@
 package query
 
 import (
-	"strings"
-
 	"github.com/huandu/go-sqlbuilder"
 )
 
@@ -14,9 +12,11 @@ type Builder interface {
 // ScoringStrategy defines how posts should be scored/ranked
 type ScoringStrategy interface {
 	// ApplyScoring writes the scoring expression to the builder
-	ApplyScoring(sb *strings.Builder)
+	ApplyScoring(sb *sqlbuilder.SelectBuilder, alias string)
 	// GetSort returns the ORDER BY clause
 	GetSort() []string
+	// Name returns a descriptive name for this scoring strategy
+	Name() string
 }
 
 // FilterStrategy adds WHERE conditions to the query

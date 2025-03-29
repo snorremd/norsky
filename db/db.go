@@ -164,16 +164,19 @@ func (db *DB) GetLatestPostTimestamp(ctx context.Context) (time.Time, error) {
 func (db *DB) GetFeedPosts(builder query.Builder, limit int, cursor int64) ([]models.FeedPost, error) {
 	query, args := builder.Build(limit, cursor)
 
-	// Debug the actual SQL query
+	// Debug the actual SQL query (only at debug level)
 	log.WithFields(log.Fields{
-		"query":  query,
-		"args":   args,
 		"limit":  limit,
 		"cursor": cursor,
-	}).Infof("Executing feed posts query")
+	}).Debug("Executing feed posts query")
 
-	// Prettyprint (whitespaces and all the query)
-	fmt.Println(query)
+	// More detailed query info only at trace level
+	if log.IsLevelEnabled(log.TraceLevel) {
+		log.WithFields(log.Fields{
+			"query": query,
+			"args":  args,
+		}).Trace("SQL query details")
+	}
 
 	rows, err := db.db.Query(query, args...)
 	if err != nil {

@@ -2,11 +2,11 @@ package feeds
 
 import (
 	"fmt"
+	"strings"
 
 	"norsky/query"
 
 	"github.com/huandu/go-sqlbuilder"
-	"github.com/lib/pq"
 )
 
 // LanguageFilter filters posts by language
@@ -16,7 +16,20 @@ type LanguageFilter struct {
 
 func (f *LanguageFilter) ApplyFilter(sb *sqlbuilder.SelectBuilder) {
 	if len(f.Languages) > 0 {
-		sb.Where(fmt.Sprintf("languages && %s", sb.Args.Add(pq.Array(f.Languages))))
+		// Create a PostgreSQL array literal string directly
+		// This avoids the parameter binding issue with arrays and subqueries
+		var escapedLangs []string
+		for _, lang := range f.Languages {
+			// Escape single quotes in language strings by doubling them
+			escapedLang := strings.ReplaceAll(lang, "'", "''")
+			escapedLangs = append(escapedLangs, fmt.Sprintf("'%s'", escapedLang))
+		}
+
+		// Create the array literal: ARRAY['lang1', 'lang2', ...]
+		arrayLiteral := fmt.Sprintf("ARRAY[%s]", strings.Join(escapedLangs, ", "))
+
+		// Add the condition with the literal array
+		sb.Where(fmt.Sprintf("languages && %s", arrayLiteral))
 	}
 }
 

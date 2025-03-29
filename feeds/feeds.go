@@ -85,14 +85,14 @@ func createFilterStrategy(config config.TomlFilter, keywords config.TomlKeywords
 func createScoringStrategy(config config.TomlScoring, keywords config.TomlKeywords) (query.ScoringStrategy, error) {
 	switch config.Type {
 	case "time_decay":
-		return &TimeDecayScoring{}, nil
+		return NewTimeDecayScoring(), nil
 	case "keyword":
 		if kw, ok := keywords[config.Keywords]; ok {
-			return &KeywordScoring{Keywords: strings.Join(kw, " OR ")}, nil
+			return NewKeywordScoring(strings.Join(kw, " OR ")), nil
 		}
 		return nil, fmt.Errorf("keyword list not found: %s", config.Keywords)
 	case "author":
-		return &AuthorScoring{Authors: config.Authors}, nil
+		return NewAuthorScoring(config.Authors), nil
 	default:
 		return nil, fmt.Errorf("unknown scoring type: %s", config.Type)
 	}
