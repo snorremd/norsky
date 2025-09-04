@@ -38,7 +38,7 @@ sudo mv norsky /usr/local/bin
 ### Docker
 
 ```bash
-docker pull ghrc.io/snorreio/norsky:latest
+docker pull ghcr.io/snorreio/norsky:latest
 ```
 
 See [./docker](./docker) for examples on how to run Norsky with [Docker Compose](https://docs.docker.com/compose/).
@@ -97,7 +97,7 @@ docker run -d \
     -p 3000:3000 \
     -v /path/to/db:/db \
     -v /path/to/feeds.toml:/feeds.toml \
-    ghrc.io/snorreio/norsky:latest
+    ghcr.io/snorreio/norsky:latest
 ```
 
 ## Norsky server configuration
