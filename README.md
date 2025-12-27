@@ -6,6 +6,12 @@ A dashboard is available at the root of the server `/`.
 The dashboard shows interesting statistics about the feed and Norwegian language posts.
 It is written in TypeScript using Solid.js and Tailwind CSS.
 
+> [!IMPORTANT]
+> This project is no longer maintained.
+> I did not have the time to properly develop and maintain the feed server anymore.
+> While it was working reasonably well, I observed more and more posts for monitized content.
+> I also did not have lots of users using the feeds so could not justify the time and cost of maintaining it.
+> The code remains here for reference and you are welcome to fork it and continue developing it for your own needs.
 
 > [!IMPORTANT]
 > Version 3.0.0 introduces a new more powerful feed configuration format and system.

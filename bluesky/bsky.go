@@ -15,7 +15,7 @@ import (
 	"github.com/labstack/gommon/log"
 )
 
-const DefaultPDSHost = "https://bsky.social"
+const DefaultPDSHost = "https://pds.snorre.io"
 
 type Credentials struct {
 	Identifier string

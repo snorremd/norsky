@@ -1,0 +1,84 @@
+[[feeds]]
+id = "bokmaal"
+display_name = "Bokmål"
+description = "A feed of Bluesky posts written in Norwegian bokmål"
+avatar_path = "./assets/avatar.png"
+filters = [
+    { type = "language", languages = ["nb", "no"] }
+]
+
+[[feeds]]
+id = "nynorsk"
+display_name = "Nynorsk"
+description = "A feed of Bluesky posts written in Norwegian nynorsk"
+avatar_path = "./assets/avatar.png"
+filters = [
+    { type = "language", languages = ["nn"] }
+]
+
+[[feeds]]
+id = "sami"
+display_name = "Sami"
+description = "A feed of Bluesky posts written in Sami"
+avatar_path = "./assets/avatar.png"
+filters = [
+    { type = "language", languages = ["se"] }
+]
+
+[[feeds]]
+id = "all"
+display_name = "Norsk (Norwegian)"
+description = "A feed of Bluesky posts written in Norwegian bokmål, nynorsk and sami"
+avatar_path = "./assets/avatar.png"
+filters = [
+    { type = "language", languages = ["nb", "nn", "no", "se"] }
+]
+
+[[feeds]]
+id = "fjernsyn"
+display_name = "Fjernsyn"
+description = "Norske poster om film, serier, streaming, tv, etc."
+avatar_path = "./assets/fjernsyn.png"
+filters = [
+    { type = "language", languages = ["nb", "no", "nn", "se"] },
+    { type = "exclude_replies" },
+    { type = "keyword", include = ["tv_keywords"], exclude = ["exclude_keywords"] }
+]
+scoring = [
+    { type = "keyword", weight = 1.0, keywords = "tv_keywords" },
+    { type = "time_decay", weight = 0.5 },
+    { type = "author", weight = 0.5, authors = [
+        { did = "", weight = 1.0 },
+        { did = "did:plc:3na2expsirkrclhl2f6ax2am", weight = 3.0 },
+        { did = "did:plc:o34f4av7ed7szx24dqm4x3g6", weight = 10.0 },
+    ] }
+]
+
+
+[keywords]
+tv_keywords = [
+    "apple tv",
+    "disney+",
+    "episode",
+    "fjernsyn",
+    "film",
+    "hbo",
+    "imdb",
+    "letterboxd",
+    "Netflix",
+    "prime video",
+    "regissør",
+    "rottentomatoes",
+    "serie",
+    "skuespiller",
+    "skyshowtime",
+    "streaming",
+    "strømming",
+    "tv"
+]
+exclude_keywords = [
+    "podcast*",
+    "radio*",
+    "film",
+    "teknisk problem*"
+]
